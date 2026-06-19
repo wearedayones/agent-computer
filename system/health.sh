@@ -25,90 +25,54 @@ else
   ok "${DISK_FREE} free (${DISK_PCT} used)"
 fi
 
-# ── Apps ──────────────────────────────────────────────────────────────────────
-section "Apps"
-
-# bybit-bot
-if tmux has-session -t persistent-agent 2>/dev/null; then
-  ok "bybit-bot — running (tmux: persistent-agent)"
+# ── Tmux Sessions ─────────────────────────────────────────────────────────────
+section "Running Sessions (tmux)"
+TMUX_OUT=$(tmux ls 2>/dev/null || echo "")
+if [ -n "$TMUX_OUT" ]; then
+  while IFS= read -r line; do
+    ok "$line"
+  done <<< "$TMUX_OUT"
 else
-  fail "bybit-bot — STOPPED  →  tmux new-session -d -s persistent-agent '~/.bybit/persistent_agent.sh'"
+  warn "No tmux sessions running"
 fi
 
-# social-factory
-CRON_COUNT=$(crontab -l 2>/dev/null | grep "social-factory" | grep -v "^#" | wc -l)
+# ── Cron ──────────────────────────────────────────────────────────────────────
+section "Cron Jobs"
+CRON_COUNT=$(crontab -l 2>/dev/null | grep -v "^#" | grep -v "^$" | wc -l)
 if [ "$CRON_COUNT" -gt 0 ]; then
-  ok "social-factory — $CRON_COUNT cron jobs active"
+  ok "$CRON_COUNT active cron jobs"
 else
-  fail "social-factory — no cron jobs found"
+  warn "No cron jobs found — run: crontab -e"
 fi
 
-# telegram
-if pgrep -f "alex.py\|antigravity_bot" &>/dev/null; then
-  ok "telegram — running"
-else
-  warn "telegram — not running (start manually if needed)"
-fi
-
-# GitHub backup sync
+# ── GitHub Sync ───────────────────────────────────────────────────────────────
 section "GitHub Sync"
 SYNC_LOG="/home/ubuntu/documents/sync.log"
 if [ -f "$SYNC_LOG" ]; then
   LAST_PUSH=$(grep "Pushed" "$SYNC_LOG" | tail -1)
-  LAST_LINE=$(tail -1 "$SYNC_LOG")
   LAST_TS=$(grep -o '\[.*\]' "$SYNC_LOG" | tail -1 | tr -d '[]')
   if [ -n "$LAST_PUSH" ]; then
     ok "Last push: $LAST_TS"
-    echo "      $(echo "$LAST_PUSH" | sed 's/\[.*\] //')"
   elif grep -q "No changes" "$SYNC_LOG"; then
     ok "Last sync: $LAST_TS — no changes (up to date)"
   else
-    warn "Sync log exists but no successful push found"
-    echo "      Last line: $LAST_LINE"
+    warn "Sync log exists but no successful push recorded"
   fi
 else
-  warn "No sync log — run: bash ~/scripts/vps-sync.sh  (or check crontab)"
-fi
-
-# ── YouTube Channels ──────────────────────────────────────────────────────────
-section "YouTube Channels"
-SF="/home/ubuntu/apps/social-factory"
-if [ -d "$SF/channels" ]; then
-  for slug in "$SF/channels"/*/; do
-    [ -d "$slug" ] || continue
-    slug=$(basename "$slug")
-    LOG="$SF/channels/$slug/state/pipeline.log"
-    TOKEN="$SF/tokens/$slug-youtube.json"
-    LAST_STATUS=$(grep "=== .* end " "$LOG" 2>/dev/null | tail -1 | grep -o "exit [0-9]*" | awk '{print $2}' || echo "")
-    LAST_RUN=$(grep "=== .* start " "$LOG" 2>/dev/null | tail -1 | sed 's/=== //' | sed 's/ start.*//' || echo "never")
-    TOKEN_OK=$([ -f "$TOKEN" ] && echo "yes" || echo "MISSING")
-
-    if [ "$TOKEN_OK" = "MISSING" ]; then
-      fail "$slug — token MISSING"
-    elif [ "$LAST_STATUS" = "0" ]; then
-      ok "$slug — last run OK · $LAST_RUN"
-    elif [ -z "$LAST_STATUS" ]; then
-      warn "$slug — no runs recorded yet · token OK"
-    else
-      fail "$slug — last run FAILED · $LAST_RUN"
-    fi
-  done
-else
-  warn "social-factory channels not found at $SF/channels"
+  warn "No sync log — see ~/scripts/vps-sync.sh for setup"
 fi
 
 # ── Python Venvs ──────────────────────────────────────────────────────────────
 section "Python Venvs"
 venv_found=0
-
-# Check ~/apps/envs/ (primary location)
 ENVS_DIR="/home/ubuntu/apps/envs"
+
 if [ -d "$ENVS_DIR" ]; then
   for v in "$ENVS_DIR"/*/; do
     [ -d "$v" ] || continue
     name=$(basename "$v")
     if [ -f "$v/bin/python3" ]; then
-      ok "$name  ($ENVS_DIR/$name)"
+      ok "$name"
       venv_found=$((venv_found+1))
     else
       fail "$name — broken (no python3 binary)"
@@ -116,44 +80,40 @@ if [ -d "$ENVS_DIR" ]; then
   done
 fi
 
-# Check legacy venv paths (may be symlinks pointing to ~/apps/envs/)
-for v in venv yt-upload-venv tg-agent-env antigravity-bot-venv; do
-  path="/home/ubuntu/$v"
-  [ -e "$path" ] || continue
-  if [ -L "$path" ]; then
-    target=$(readlink -f "$path")
-    ok "$v → $target  (symlink)"
+# Legacy venv paths (may be symlinks)
+for v in /home/ubuntu/venv /home/ubuntu/yt-upload-venv /home/ubuntu/tg-agent-env /home/ubuntu/antigravity-bot-venv; do
+  [ -e "$v" ] || continue
+  name=$(basename "$v")
+  if [ -L "$v" ]; then
+    target=$(readlink -f "$v")
+    ok "$name → $target  (symlink)"
     venv_found=$((venv_found+1))
-  elif [ -f "$path/bin/python3" ]; then
-    ok "$v  (legacy path)"
+  elif [ -f "$v/bin/python3" ]; then
+    ok "$name  (legacy path)"
     venv_found=$((venv_found+1))
-  else
-    fail "$v — broken"
   fi
 done
 
-[ "$venv_found" -eq 0 ] && warn "No Python venvs found (check ~/apps/envs/)"
+[ "$venv_found" -eq 0 ] && warn "No Python venvs found (expected in ~/apps/envs/)"
 
 # ── API Keys ──────────────────────────────────────────────────────────────────
 section "API Keys"
 KEY_DIR="/home/ubuntu/keys"
 if [ -d "$KEY_DIR" ]; then
-  KEY_COUNT=0
-  MISSING_COUNT=0
+  key_count=0
   for f in "$KEY_DIR"/*; do
     [ -f "$f" ] || continue
     name=$(basename "$f")
     if [ -s "$f" ]; then
       ok "$name"
-      KEY_COUNT=$((KEY_COUNT+1))
+      key_count=$((key_count+1))
     else
-      fail "$name — empty file"
-      MISSING_COUNT=$((MISSING_COUNT+1))
+      fail "$name — empty"
     fi
   done
-  [ "$KEY_COUNT" -eq 0 ] && warn "No key files found in ~/keys/"
+  [ "$key_count" -eq 0 ] && warn "No key files in ~/keys/"
 else
-  warn "~/keys/ directory not found"
+  warn "~/keys/ not found"
 fi
 
 # ── Root Cleanliness ──────────────────────────────────────────────────────────
@@ -168,7 +128,7 @@ for item in /home/ubuntu/* /home/ubuntu/.[^.]*; do
 done
 CLUTTER=$(echo "$CLUTTER" | xargs)
 if [ -z "$CLUTTER" ]; then
-  ok "Root is clean — no clutter"
+  ok "Root is clean"
 else
   fail "Root clutter: $CLUTTER — move to correct zone then run: map"
 fi

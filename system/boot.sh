@@ -12,12 +12,10 @@ echo -e "\n${BOLD}Agent Computer v${VERSION} — Session Start${NC}  $(date -u '
 DISK_FREE=$(df -h /home/ubuntu | awk 'NR==2{print $4}')
 DISK_PCT=$(df /home/ubuntu | awk 'NR==2{print $5}')
 DISK_FREE_GB=$(df -BG /home/ubuntu | awk 'NR==2{gsub("G","",$4); print $4}')
-BYBIT=$(tmux has-session -t persistent-agent 2>/dev/null && echo "running" || echo "STOPPED")
-SF_CRONS=$(crontab -l 2>/dev/null | grep "social-factory" | grep -v "^#" | wc -l)
+TMUX_LIST=$(tmux ls 2>/dev/null | awk -F: '{print $1}' | tr '\n' ' ' | sed 's/ $//')
+CRON_COUNT=$(crontab -l 2>/dev/null | grep -v "^#" | grep -v "^$" | wc -l)
 INBOX=$(ls /home/ubuntu/inbox/*.md 2>/dev/null | wc -l)
-
-# Last GitHub sync
-LAST_SYNC=$(grep -o '\[.*\]' /home/ubuntu/documents/sync.log 2>/dev/null | tail -1 | tr -d '[]' || echo "never")
+LAST_SYNC_TS=$(grep -o '\[.*\]' /home/ubuntu/documents/sync.log 2>/dev/null | tail -1 | tr -d '[]' || echo "never")
 
 echo -e "${BLUE}── Pulse${NC}"
 
@@ -30,20 +28,15 @@ else
   echo "  Disk:      $DISK_FREE free ($DISK_PCT used)"
 fi
 
-# Apps
-if [ "$BYBIT" = "running" ]; then
-  echo -e "  bybit-bot: ${GREEN}running${NC}"
+# Tmux sessions
+if [ -n "$TMUX_LIST" ]; then
+  echo -e "  Sessions:  ${GREEN}$TMUX_LIST${NC}"
 else
-  echo -e "  bybit-bot: ${RED}STOPPED${NC}  ← restart: tmux new-session -d -s persistent-agent '~/.bybit/persistent_agent.sh'"
+  echo "  Sessions:  none"
 fi
 
-if [ "$SF_CRONS" -gt 0 ]; then
-  echo -e "  yt-factory: ${GREEN}$SF_CRONS cron jobs active${NC}"
-else
-  echo -e "  yt-factory: ${YELLOW}no cron jobs${NC}"
-fi
-
-echo "  last sync: $LAST_SYNC"
+echo "  Cron:      $CRON_COUNT active jobs"
+echo "  Last sync: $LAST_SYNC_TS"
 
 # ── Inbox ─────────────────────────────────────────────────────────────────────
 if [ "$INBOX" -gt 0 ]; then
@@ -70,9 +63,7 @@ echo -e "\n${BLUE}── Quick Commands${NC}"
 echo "  check                  full health report"
 echo "  map                    refresh README.md"
 echo "  update                 pull latest from GitHub"
-echo "  run <ch> short         upload a YouTube Short now"
-echo "  run <ch> long 1900     schedule long video at 19:00 UTC"
-echo "  note \"msg\"            leave a message for next agent"
+echo "  note \"msg\"             leave a message for next agent"
 echo "  export --include-secrets  package VPS for migration"
 echo "  cat ~/AGENT.md         full operating guide"
 echo ""

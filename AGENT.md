@@ -7,10 +7,10 @@
 ## 60-Second Orientation
 
 ```bash
-boot    # run this first — disk, apps, inbox, last 3 changes, quick commands
+boot    # run this first — disk, sessions, inbox, last changes, quick commands
 ```
 
-After `boot`: check README.md alerts → fix any FAILED/STOPPED/MISSING items → do your work → run `map`.
+After `boot`: check README.md alerts → fix anything broken → do your work → run `map`.
 
 ---
 
@@ -18,13 +18,13 @@ After `boot`: check README.md alerts → fix any FAILED/STOPPED/MISSING items �
 
 | Command | Action |
 |---------|--------|
-| `boot` | Session startup: disk, apps, inbox, last changes, command list |
-| `check` | Full color health report (disk · apps · channels · venvs · keys · inbox) |
+| `boot` | Session startup: disk, sessions, inbox, last changes |
+| `check` | Full color health report |
 | `map` | Regenerate README.md from live state |
 | `update` | Pull latest agent-computer infrastructure from GitHub |
 | `note "msg"` | Leave a message for the next agent in `~/inbox/` |
-| `export` | Package computer for server migration (configs only) |
-| `export --include-secrets` | Full export including API keys and OAuth tokens |
+| `export` | Package computer for migration (configs only) |
+| `export --include-secrets` | Full export including API keys and tokens |
 
 ---
 
@@ -55,7 +55,7 @@ Never drop files at `~/` root. Always use a zone.
 mkdir ~/media/screenshots   # new subfolder inside a zone — OK
 # NEVER: mkdir ~/screenshots  (at root — WRONG)
 ```
-**Naming:** lowercase and hyphens only. No spaces, no underscores, no capitals.
+Naming: lowercase and hyphens only. No spaces, no underscores, no capitals.
 
 ### 2. Archive before deleting
 ```bash
@@ -69,11 +69,8 @@ map
 ```
 Run after: adding apps, moving files, changing cron, installing packages, editing configs.
 
-### 4. Never touch these
-- `~/keys/` — read-only; never write or delete
-- `~/.hermes/` — managed by Hermes; hands off
-- `~/.bybit/` — trading bot credentials and live state; never touch
-- `~/apps/social-factory/tokens/` — OAuth tokens; read-only
+### 4. Never touch protected paths
+Check `~/CLAUDE.md` for the list of protected paths specific to this computer.
 
 ---
 
@@ -100,61 +97,17 @@ Root only contains: `AGENT.md`, `CLAUDE.md`, `README.md`
 
 ## App Registry
 
-### social-factory (YouTube + TikTok automation)
+Add your apps here after installing them. Example format:
 
-```bash
-# Location
-~/apps/social-factory/
-
-# Test pipeline (no upload)
-~/apps/social-factory/scripts/run.sh <channel> short --no-upload
-~/apps/social-factory/scripts/run.sh <channel> long --no-upload
-
-# Upload now
-~/apps/social-factory/scripts/run.sh <channel> short
-~/apps/social-factory/scripts/run.sh <channel> long 1900   # schedule for 19:00 UTC
-
-# Check channel logs
-tail -50 ~/apps/social-factory/channels/<channel>/state/pipeline.log
-
-# List channels
-ls ~/apps/social-factory/channels/
-
-# Tokens (OAuth — read only, never delete)
-ls ~/apps/social-factory/tokens/
-
-# Config for a channel
-cat ~/apps/social-factory/channels/<channel>/config.json
+```
+### my-bot
+- Location: ~/apps/my-bot/
+- Start: tmux new-session -d -s my-bot 'bash ~/apps/my-bot/run.sh'
+- Check: tmux has-session -t my-bot && echo running || echo STOPPED
+- Logs: tail -f ~/apps/my-bot/bot.log
 ```
 
-### bybit-bot (trading)
-
-```bash
-# Check status
-tmux has-session -t persistent-agent && echo running || echo STOPPED
-
-# Start if stopped
-tmux new-session -d -s persistent-agent '~/.bybit/persistent_agent.sh'
-
-# Attach and watch
-tmux attach -t persistent-agent
-# Detach: Ctrl+B then D
-
-# State and logs
-ls ~/.bybit/
-```
-
-> **Mainnet trades (real money) — always confirm with the owner before placing.**
-
-### telegram
-
-```bash
-# Check status
-pgrep -f "alex.py\|antigravity_bot" && echo running || echo stopped
-
-# App location
-ls ~/apps/telegram/
-```
+`~/CLAUDE.md` is where you put app-specific rules and protected paths.
 
 ---
 
@@ -163,13 +116,11 @@ ls ~/apps/telegram/
 Shared venvs live in `~/apps/envs/`:
 ```bash
 ls ~/apps/envs/                              # list all venvs
-source ~/apps/envs/sf-venv/bin/activate     # activate one
+source ~/apps/envs/my-venv/bin/activate     # activate one
 deactivate                                   # deactivate
-```
 
-Install packages into the correct venv — never into the system Python:
-```bash
-~/apps/envs/sf-venv/bin/pip install <package>
+# Install packages into a venv (never into system Python)
+~/apps/envs/my-venv/bin/pip install <package>
 ```
 
 ---
@@ -178,8 +129,8 @@ Install packages into the correct venv — never into the system Python:
 
 Leave messages for the next agent in `~/inbox/`:
 ```bash
-note "finished token refresh for aura-clips — all channels healthy"
-note "bybit bot was STOPPED — restarted at 14:30 UTC, investigate why it stopped"
+note "finished token refresh — all services healthy"
+note "bot was STOPPED — restarted at 14:30 UTC, investigate why"
 
 ls ~/inbox/         # list all messages
 cat ~/inbox/*.md    # read all messages
@@ -191,47 +142,25 @@ cat ~/inbox/*.md    # read all messages
 
 ## Fixing Common Problems
 
-### bybit-bot stopped
+### App stopped unexpectedly
 ```bash
-tmux new-session -d -s persistent-agent '~/.bybit/persistent_agent.sh'
-note "bybit-bot was STOPPED — restarted"
-```
-
-### YouTube pipeline FAILED
-```bash
-# See what failed
-tail -100 ~/apps/social-factory/channels/<channel>/state/pipeline.log
-
-# Re-run as a test
-~/apps/social-factory/scripts/run.sh <channel> short --no-upload
-
-# If token error: token needs re-auth (OAuth expired)
-ls ~/apps/social-factory/tokens/
+tmux ls                      # see all running sessions
+cat ~/documents/changelog.md | tail -20   # see recent events
+# Check your app's logs in ~/apps/<name>/
 ```
 
 ### Disk over 85%
 ```bash
-df -h ~                                            # current usage
-du -sh ~/downloads/* 2>/dev/null | sort -h         # what's in downloads?
-du -sh ~/media/exports/* 2>/dev/null | sort -h     # old exports?
+df -h ~
+du -sh ~/downloads/* 2>/dev/null | sort -h     # downloads?
+du -sh ~/media/exports/* 2>/dev/null | sort -h # old exports?
 du -sh ~/projects/*/node_modules 2>/dev/null | sort -h  # node_modules?
-
-# Clean safely
-npm cache clean --force                            # npm cache
-find ~/projects -name ".next" -type d -maxdepth 3 -exec du -sh {} \;  # Next.js build dirs
+npm cache clean --force                        # npm cache
 ```
 
-### OAuth token expired (YouTube)
+### Root clutter
 ```bash
-# Re-auth: run the OAuth script for that channel
-# The token file will be at ~/apps/social-factory/tokens/<channel>-youtube.json
-# Check the channel's README or auth script for re-auth instructions
-```
-
-### Root clutter (file dropped in wrong place)
-```bash
-# The relocator runs every 15min and auto-moves files
-# To move manually:
+# The relocator runs every 15 min — or move manually:
 mv ~/some-file.py ~/scripts/
 mv ~/some-image.png ~/media/images/
 map
@@ -241,14 +170,16 @@ map
 
 ## GitHub Backup
 
-This computer auto-syncs to a private GitHub repo every 6 hours:
+Set up auto-sync to a private GitHub repo every 6 hours:
 ```bash
 bash ~/scripts/vps-sync.sh           # sync now
-tail -20 ~/documents/sync.log        # check last sync result
+tail -20 ~/documents/sync.log        # check last sync
 ```
 
+See `~/scripts/vps-sync.sh` for one-time setup instructions.
+
 The backup includes: apps (excl. venvs/node_modules), projects, scripts, documents, crontab, pip freeze lists.
-It does NOT include: secret keys, OAuth tokens, `.next/`, node_modules, Python venvs.
+It does NOT include: secret keys, OAuth tokens, build dirs, venvs.
 
 ---
 
@@ -268,13 +199,13 @@ Files dropped in the wrong place are automatically moved every 15 minutes:
 | `.md`, `.txt` (non-system) | `~/documents/` |
 | Unknown directories | `~/downloads/` or `~/apps/` or `~/projects/` |
 
-All moves are logged to `~/documents/changelog.md`.
+All moves logged to `~/documents/changelog.md`.
 
 ---
 
 ## Auto-Updates
 
-Infrastructure updates daily at 06:00 UTC from the GitHub repo:
+Infrastructure updates daily at 06:00 UTC:
 ```bash
 update    # manual update now
 ```
@@ -287,12 +218,11 @@ Your apps, projects, documents, and keys are **never touched**.
 ## Migration
 
 ```bash
-# Create export
 export                         # configs only (safe to share)
-export --include-secrets       # full export with tokens and keys
+export --include-secrets       # full export with keys and tokens
 # Output: ~/vps-export-YYYYMMDD.tar.gz
 
-# Restore on new server
+# Restore on new server:
 scp ~/vps-export-*.tar.gz ubuntu@<new-server>:~/
 ssh ubuntu@<new-server>
 tar -xzf vps-export-*.tar.gz && cd vps-export-* && bash restore.sh
@@ -319,4 +249,4 @@ After **any** change to this computer:
 ```bash
 map
 ```
-This regenerates `README.md` from live state so every agent always starts with accurate info.
+This regenerates `README.md` so every agent starts with accurate info.
