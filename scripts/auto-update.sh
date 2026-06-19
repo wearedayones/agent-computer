@@ -31,7 +31,7 @@ if [ -z "$REMOTE_VERSION" ]; then
   exit 1
 fi
 
-# Compare versions (simple string compare works for semver if padded properly)
+# Compare versions
 if [ "$REMOTE_VERSION" = "$LOCAL_VERSION" ]; then
   echo "[update] Already up to date (v$LOCAL_VERSION)"
   exit 0
@@ -61,14 +61,15 @@ update_file() {
   cp "$src" "$dst"
 }
 
-update_file "$SRC/AGENT.md"           "$HOME_DIR/AGENT.md"
-update_file "$SRC/CLAUDE.md"          "$HOME_DIR/CLAUDE.md"
-update_file "$SRC/scripts/vps-map.sh"    "$HOME_DIR/scripts/vps-map.sh"
-update_file "$SRC/scripts/vps-export.sh" "$HOME_DIR/scripts/vps-export.sh"
-update_file "$SRC/scripts/auto-update.sh" "$HOME_DIR/scripts/auto-update.sh"
-update_file "$SRC/system/health.sh"   "$HOME_DIR/system/health.sh"
-update_file "$SRC/system/boot.sh"     "$HOME_DIR/system/boot.sh"
-update_file "$SRC/system/relocator.sh" "$HOME_DIR/system/relocator.sh"
+update_file "$SRC/AGENT.md"                   "$HOME_DIR/AGENT.md"
+update_file "$SRC/CLAUDE.md"                  "$HOME_DIR/CLAUDE.md"
+update_file "$SRC/scripts/vps-map.sh"         "$HOME_DIR/scripts/vps-map.sh"
+update_file "$SRC/scripts/vps-export.sh"      "$HOME_DIR/scripts/vps-export.sh"
+update_file "$SRC/scripts/vps-sync.sh"        "$HOME_DIR/scripts/vps-sync.sh"
+update_file "$SRC/scripts/auto-update.sh"     "$HOME_DIR/scripts/auto-update.sh"
+update_file "$SRC/system/health.sh"           "$HOME_DIR/system/health.sh"
+update_file "$SRC/system/boot.sh"             "$HOME_DIR/system/boot.sh"
+update_file "$SRC/system/relocator.sh"        "$HOME_DIR/system/relocator.sh"
 
 for f in "$SRC/bin/"*; do
   [ -f "$f" ] || continue
@@ -79,10 +80,10 @@ done
 # Make everything executable
 chmod +x "$HOME_DIR/bin/"* "$HOME_DIR/system/"*.sh "$HOME_DIR/scripts/"*.sh 2>/dev/null
 
-# Update version and lock file
+# Update version file
 echo "$REMOTE_VERSION" > "$VERSION_FILE"
 cat > "$HOME_DIR/system/.installed" <<LOCK
-  Installed:  $(cat "$HOME_DIR/system/.installed" 2>/dev/null | grep 'Installed:' | sed 's/.*Installed: *//' || echo "unknown")
+  Installed:  $(grep 'Installed:' "$HOME_DIR/system/.installed" 2>/dev/null | sed 's/.*Installed: *//' || echo "unknown")
   Version:    v$REMOTE_VERSION
   Updated:    $(date -u '+%Y-%m-%d %H:%M UTC')
   Server:     $(hostname)

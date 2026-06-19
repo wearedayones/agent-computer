@@ -1,6 +1,6 @@
 #!/bin/bash
 # relocator.sh — auto-move misplaced files/dirs to the correct zone
-# Runs every 5 min via cron. Logs all moves to ~/documents/changelog.md.
+# Runs every 15 min via cron. Logs all moves to ~/documents/changelog.md.
 
 HOME_DIR="/home/ubuntu"
 CHANGELOG="$HOME_DIR/documents/changelog.md"
@@ -40,7 +40,6 @@ move_file() {
       mkdir -p "$HOME_DIR/documents/logs"
       dest="$HOME_DIR/documents/logs" ;;
     md|txt)
-      # Only move non-system .md files
       if [[ "$name" != "AGENT.md" && "$name" != "CLAUDE.md" && "$name" != "README.md" ]]; then
         dest="$HOME_DIR/documents"
       fi ;;
@@ -62,9 +61,7 @@ move_dir() {
   local name="$2"
   local dest=""
 
-  # Detect type from contents
   if [ -f "$path/package.json" ] || [ -f "$path/tsconfig.json" ] || [ -f "$path/next.config.js" ] || [ -f "$path/next.config.ts" ]; then
-    # Web project/app
     if ls "$path" | grep -qiE "bot|agent|daemon|server" 2>/dev/null || [[ "$name" =~ bot|agent|daemon ]]; then
       dest="$HOME_DIR/apps"
     else
@@ -89,16 +86,10 @@ for item in "$HOME_DIR"/* "$HOME_DIR"/.[!.]*; do
   [ -e "$item" ] || continue
   name=$(basename "$item")
 
-  # Skip hidden files/dirs
   [[ "$name" == .* ]] && continue
-
-  # Skip allowed items
   echo "$ALLOWED" | grep -qw "$name" && continue
 
-  # Skip symlinks that are in allowed list by target (the venv symlinks)
   if [ -L "$item" ]; then
-    echo "$ALLOWED" | grep -qw "$name" && continue
-    # Unknown symlink — leave it, don't auto-move
     echo "- [$NOW] WARNING: unknown symlink at root: ~/$name" >> "$CHANGELOG"
     continue
   fi
@@ -110,9 +101,7 @@ for item in "$HOME_DIR"/* "$HOME_DIR"/.[!.]*; do
   fi
 done
 
-# ── also scan common wrong locations ─────────────────────────────────────────
-
-# Media files dropped into ~/documents/ or ~/downloads/
+# ── scan wrong locations (media dropped into documents/downloads) ──────────────
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   name=$(basename "$f")

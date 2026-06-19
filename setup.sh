@@ -35,8 +35,8 @@ if [ -f "$LOCK_FILE" ] && [ "$MODE" = "install" ]; then
   echo "  Each server can only have ONE Agent Computer installation."
   echo ""
   echo "  Options:"
-  echo "    update   → pull latest version from GitHub"
-  echo "    bash setup.sh --force  → archive existing and reinstall"
+  echo "    bash setup.sh --update  → pull latest version from GitHub"
+  echo "    bash setup.sh --force   → archive existing and reinstall"
   echo ""
   exit 1
 fi
@@ -60,6 +60,8 @@ echo "════════════════════════�
 echo "  Agent Computer — Setup"
 if [ "$MODE" = "force" ]; then
   echo "  Mode: FORCE REINSTALL"
+elif [ "$MODE" = "update" ]; then
+  echo "  Mode: UPDATE"
 else
   echo "  Mode: FRESH INSTALL"
 fi
@@ -116,7 +118,7 @@ cat > "$LOCK_FILE" <<LOCK
 LOCK
 
 # ── add ~/bin to PATH ─────────────────────────────────────────────────────────
-if ! grep -q '"$HOME/bin"' "$HOME_DIR/.bashrc" 2>/dev/null && ! grep -q '/home/.*bin.*PATH' "$HOME_DIR/.bashrc" 2>/dev/null; then
+if ! grep -qE '(HOME/bin|\$HOME/bin|~/bin).*PATH|PATH.*(HOME/bin|\$HOME/bin|~/bin)' "$HOME_DIR/.bashrc" 2>/dev/null; then
   echo "→ Adding ~/bin to PATH..."
   echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME_DIR/.bashrc"
 fi
@@ -131,8 +133,13 @@ add_cron() {
 $job"
 }
 
-add_cron "*/5 * * * * bash $HOME_DIR/system/relocator.sh >> $HOME_DIR/system/relocator.log 2>&1" "relocator"
+# Relocator: every 15 min (not 5 — reduces noise without losing responsiveness)
+add_cron "*/15 * * * * bash $HOME_DIR/system/relocator.sh >> $HOME_DIR/system/relocator.log 2>&1" "relocator"
+
+# Map: every hour
 add_cron "0 * * * * bash $HOME_DIR/scripts/vps-map.sh >> /dev/null 2>&1" "vps-map"
+
+# Auto-update: daily at 06:00 UTC
 add_cron "0 6 * * * bash $HOME_DIR/scripts/auto-update.sh >> $HOME_DIR/system/update.log 2>&1" "auto-update"
 
 echo "$EXISTING" | crontab -
@@ -144,5 +151,10 @@ bash "$HOME_DIR/scripts/vps-map.sh" 2>/dev/null || true
 echo ""
 echo "═══════════════════════════════════════════"
 echo "  ✓ Agent Computer v$INSTALLED_VERSION installed!"
+echo ""
 echo "  Run: source ~/.bashrc && boot"
+echo ""
+echo "  Optional:"
+echo "    Set up GitHub backup: edit ~/scripts/vps-sync.sh"
+echo "    Add to crontab: 0 */6 * * * bash ~/scripts/vps-sync.sh >> ~/documents/sync.log 2>&1"
 echo "═══════════════════════════════════════════"
