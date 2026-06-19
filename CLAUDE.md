@@ -6,66 +6,91 @@
 
 ---
 
-## Session Startup (do this every time you arrive)
+## Session Startup (every time you arrive)
 
 ```bash
-boot        # quick orientation: disk, sessions, inbox, last changes
+boot
 ```
 
-Or manually:
-```bash
-cat ~/AGENT.md          # full operating guide
-cat ~/README.md         # live state + alerts
-check                   # full color health report
-```
-
-If `boot` or README shows any alerts — **fix those first**.
+If `boot` shows any alerts — **fix those first before doing anything else.**
 
 ---
 
-## House Rules (mandatory — never break these)
+## File Rules (read carefully — agents often get these wrong)
 
-### Where things go
-| Type of thing | Put it in |
-|--------------|-----------|
-| New autonomous app / bot | `~/apps/<name>/` |
-| New dev project | `~/projects/<name>/` |
-| New script / tool | `~/scripts/` |
-| Notes, guides, references | `~/documents/` |
-| Images, photos, thumbnails | `~/media/images/` |
-| Videos, clips | `~/media/videos/` |
-| Audio, music | `~/media/audio/` |
-| Exported/rendered output | `~/media/exports/` |
-| Temp / downloaded content | `~/downloads/` |
-| Python venvs | `~/apps/envs/<name>-venv/` |
-| **Root (`~/`)** | **NOTHING** — only the 3 `.md` files that already exist |
+### Flat files — never nest unnecessarily
+```
+✓  ~/documents/links.md
+✗  ~/documents/links/links.md
 
-**Creating new sub-folders is allowed** — but only inside an existing zone, never at root.
+✓  ~/documents/notes.md
+✗  ~/documents/notes/notes.md
+```
+Only create a subfolder inside a zone if you have **multiple related files** that belong together.
 
-### Never delete without archiving
+### Always check before creating
 ```bash
-mv ~/apps/old-bot ~/archive/old-bot   # always archive first
+ls ~/documents/          # does the file already exist?
+cat ~/documents/foo.md   # read it before writing
 ```
 
-### Always update the map after changes
+### Zone rules
+| Type | Zone |
+|------|------|
+| New app / bot | `~/apps/<name>/` |
+| New project | `~/projects/<name>/` |
+| New script | `~/scripts/` |
+| Notes / docs | `~/documents/` |
+| Images | `~/media/images/` |
+| Videos | `~/media/videos/` |
+| Audio | `~/media/audio/` |
+| Temp files | `~/downloads/` |
+| Python venvs | `~/apps/envs/<name>/` |
+| **Root** | **NOTHING** — only AGENT.md, CLAUDE.md, README.md |
+
+---
+
+## Inter-Agent Messages → `note`, not files
+
 ```bash
-map
+note "your message"    # → ~/inbox/ (next agent sees this on boot)
+```
+
+Never create files in `~/documents/` to leave messages. Use `note`.
+
+---
+
+## After Every Change
+
+```bash
+map    # regenerate README.md — always do this
 ```
 
 ---
 
-## Protected Paths (customize for your setup)
+## Never Delete Without Archiving
 
-Add paths that should never be modified here. Example:
+```bash
+mv ~/apps/old-bot ~/archive/old-bot   # ✓ archive first
+rm -rf ~/apps/old-bot                 # ✗ never
 ```
-- ~/keys/          — API credentials, read-only
-- ~/some-app/data/ — live database, never touch
+
+---
+
+## Never Touch Protected Paths
+
+Add this computer's protected paths below (customize per installation):
+
+```
+# Example:
+# ~/keys/          — API credentials, read-only
+# ~/some-app/db/   — live database, never touch
 ```
 
 ---
 
 ## Permission Mode
-`bypassPermissions` — no confirmation prompts needed for normal operations.
+`bypassPermissions` — no confirmation prompts for normal operations.
 **Real-money or destructive actions — always confirm with the owner first.**
 
 ---
@@ -78,5 +103,5 @@ Add paths that should never be modified here. Example:
 | `check` | Full color health report |
 | `map` | Regenerate README.md |
 | `update` | Pull latest from GitHub |
-| `note "msg"` | Leave a message for next agent |
+| `note "msg"` | Leave message for next agent |
 | `export` | Package for migration |

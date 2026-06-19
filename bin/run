@@ -1,4 +1,12 @@
 #!/bin/bash
-# run <channel> <short|long> [HHMM] [--no-upload]
-# Shortcut for social-factory pipeline
-exec /home/ubuntu/apps/social-factory/scripts/run.sh "$@"
+# run — shortcut for your app's main command
+# Customize this for your setup. Example:
+#   exec /home/ubuntu/apps/my-bot/scripts/run.sh "$@"
+#
+# After customizing, run: map
+
+echo "No 'run' command configured."
+echo "Edit ~/bin/run to point it at your app's main script."
+echo ""
+echo "Example:"
+echo "  exec /home/ubuntu/apps/my-bot/scripts/run.sh \"\$@\""

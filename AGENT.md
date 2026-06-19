@@ -60,17 +60,69 @@ Naming: lowercase and hyphens only. No spaces, no underscores, no capitals.
 ### 2. Archive before deleting
 ```bash
 mv ~/apps/old-bot ~/archive/old-bot    # archive first
-# rm -rf ~/apps/old-bot                # NEVER skip archiving
+# rm -rf ~/apps/old-bot                # NEVER — always archive first
 ```
 
 ### 3. Update the map after any change
 ```bash
 map
 ```
-Run after: adding apps, moving files, changing cron, installing packages, editing configs.
+Run after: creating files, adding apps, moving things, editing configs, changing cron.
 
 ### 4. Never touch protected paths
-Check `~/CLAUDE.md` for the list of protected paths specific to this computer.
+Check `~/CLAUDE.md` for the protected paths specific to this computer.
+
+---
+
+## Creating Files — Do It Right
+
+**Always use the shortest valid path. Never create a folder just to hold one file.**
+
+```
+✓  ~/documents/links.md
+✗  ~/documents/links/links.md     ← unnecessary nesting
+
+✓  ~/documents/notes.md
+✗  ~/documents/notes/notes.md     ← same mistake
+
+✓  ~/scripts/cleanup.sh
+✗  ~/scripts/cleanup/cleanup.sh   ← wrong
+```
+
+**Only create a subfolder when you have multiple related files:**
+```
+✓  ~/documents/api-docs/auth.md
+✓  ~/documents/api-docs/endpoints.md
+   (two files that belong together — subfolder makes sense)
+
+✗  ~/documents/api-docs/api-docs.md
+   (just one file — use ~/documents/api-docs.md instead)
+```
+
+**Check before creating.** Always check if a file already exists before making a new one:
+```bash
+ls ~/documents/          # see what's already there
+cat ~/documents/links.md # read it before overwriting
+```
+
+---
+
+## Inter-Agent Messaging
+
+`note` is for leaving messages that the **next agent reads on arrival**. It goes to `~/inbox/`, not `~/documents/`.
+
+```bash
+note "finished token refresh — all services healthy"
+note "disk was at 89% — cleared downloads/, now 74%"
+note "DO NOT restart the bot — owner is monitoring a live trade"
+
+ls ~/inbox/         # list all messages
+cat ~/inbox/*.md    # read all messages
+```
+
+`boot` shows inbox messages automatically on arrival.
+
+**Do not** use `~/documents/` to leave messages for the next agent. Use `note`.
 
 ---
 
@@ -81,7 +133,7 @@ Check `~/CLAUDE.md` for the list of protected paths specific to this computer.
 | **Apps** | `~/apps/` | Autonomous apps that run 24/7 |
 | **Projects** | `~/projects/` | Active development work |
 | **Scripts** | `~/scripts/` | Tools and utilities |
-| **Documents** | `~/documents/` | Guides, notes, references |
+| **Documents** | `~/documents/` | Guides, notes, references — flat files |
 | **Media** | `~/media/` | images/ · videos/ · audio/ · exports/ |
 | **Downloads** | `~/downloads/` | Temporary fetched content (safe to clear) |
 | **Keys** | `~/keys/` | API credentials (never commit, never log) |
@@ -95,19 +147,36 @@ Root only contains: `AGENT.md`, `CLAUDE.md`, `README.md`
 
 ---
 
+## Common Mistakes — Don't Do These
+
+| Wrong | Right |
+|-------|-------|
+| `~/documents/links/links.md` | `~/documents/links.md` |
+| `~/temp/`, `~/tmp/`, `~/data/` at root | `~/downloads/` |
+| `rm -rf ~/apps/old-bot` | `mv ~/apps/old-bot ~/archive/old-bot` |
+| Putting scripts in `~/apps/` | `~/scripts/your-script.sh` |
+| Putting projects in `~/apps/` | `~/projects/your-project/` |
+| Creating files without running `map` | Always run `map` after |
+| Leaving messages in `~/documents/` | Use `note "msg"` → `~/inbox/` |
+| Writing to `~/keys/` | Read-only — never write |
+| Not checking if a file exists before creating | Always `ls` first |
+
+---
+
 ## App Registry
 
-Add your apps here after installing them. Example format:
+Add your apps here after installing them. Example:
 
 ```
 ### my-bot
 - Location: ~/apps/my-bot/
-- Start: tmux new-session -d -s my-bot 'bash ~/apps/my-bot/run.sh'
-- Check: tmux has-session -t my-bot && echo running || echo STOPPED
-- Logs: tail -f ~/apps/my-bot/bot.log
+- Start:    tmux new-session -d -s my-bot 'bash ~/apps/my-bot/run.sh'
+- Check:    tmux has-session -t my-bot && echo running || echo STOPPED
+- Logs:     tail -f ~/apps/my-bot/bot.log
+- Stop:     tmux kill-session -t my-bot
 ```
 
-`~/CLAUDE.md` is where you put app-specific rules and protected paths.
+App-specific commands and protected paths go in `~/CLAUDE.md`.
 
 ---
 
@@ -119,24 +188,9 @@ ls ~/apps/envs/                              # list all venvs
 source ~/apps/envs/my-venv/bin/activate     # activate one
 deactivate                                   # deactivate
 
-# Install packages into a venv (never into system Python)
+# Install packages into a venv — never into system Python
 ~/apps/envs/my-venv/bin/pip install <package>
 ```
-
----
-
-## Inter-Agent Messaging
-
-Leave messages for the next agent in `~/inbox/`:
-```bash
-note "finished token refresh — all services healthy"
-note "bot was STOPPED — restarted at 14:30 UTC, investigate why"
-
-ls ~/inbox/         # list all messages
-cat ~/inbox/*.md    # read all messages
-```
-
-`boot` shows inbox messages automatically on arrival.
 
 ---
 
@@ -144,24 +198,24 @@ cat ~/inbox/*.md    # read all messages
 
 ### App stopped unexpectedly
 ```bash
-tmux ls                      # see all running sessions
-cat ~/documents/changelog.md | tail -20   # see recent events
-# Check your app's logs in ~/apps/<name>/
+tmux ls                                    # see all running sessions
+tail -20 ~/documents/changelog.md          # see recent events
+# Check the app's own logs in ~/apps/<name>/
 ```
 
 ### Disk over 85%
 ```bash
 df -h ~
-du -sh ~/downloads/* 2>/dev/null | sort -h     # downloads?
-du -sh ~/media/exports/* 2>/dev/null | sort -h # old exports?
+du -sh ~/downloads/* 2>/dev/null | sort -h         # large downloads?
+du -sh ~/media/exports/* 2>/dev/null | sort -h     # old exports?
 du -sh ~/projects/*/node_modules 2>/dev/null | sort -h  # node_modules?
-npm cache clean --force                        # npm cache
+npm cache clean --force
 ```
 
 ### Root clutter
 ```bash
-# The relocator runs every 15 min — or move manually:
-mv ~/some-file.py ~/scripts/
+# The relocator auto-moves files every 15 min — or move manually:
+mv ~/some-file.txt ~/documents/
 mv ~/some-image.png ~/media/images/
 map
 ```
@@ -170,7 +224,7 @@ map
 
 ## GitHub Backup
 
-Set up auto-sync to a private GitHub repo every 6 hours:
+Auto-sync to a private GitHub repo every 6 hours:
 ```bash
 bash ~/scripts/vps-sync.sh           # sync now
 tail -20 ~/documents/sync.log        # check last sync
@@ -178,8 +232,8 @@ tail -20 ~/documents/sync.log        # check last sync
 
 See `~/scripts/vps-sync.sh` for one-time setup instructions.
 
-The backup includes: apps (excl. venvs/node_modules), projects, scripts, documents, crontab, pip freeze lists.
-It does NOT include: secret keys, OAuth tokens, build dirs, venvs.
+Backup includes: apps (excl. venvs/node_modules), projects, scripts, documents, crontab, pip freeze lists.
+Does NOT include: secret keys, OAuth tokens, build dirs, Python venvs.
 
 ---
 
@@ -197,7 +251,8 @@ Files dropped in the wrong place are automatically moved every 15 minutes:
 | `.sh` | `~/scripts/` |
 | `.log` | `~/documents/logs/` |
 | `.md`, `.txt` (non-system) | `~/documents/` |
-| Unknown directories | `~/downloads/` or `~/apps/` or `~/projects/` |
+| No extension (text content) | `~/downloads/` |
+| Unknown directories | `~/downloads/`, `~/apps/`, or `~/projects/` |
 
 All moves logged to `~/documents/changelog.md`.
 
@@ -218,9 +273,8 @@ Your apps, projects, documents, and keys are **never touched**.
 ## Migration
 
 ```bash
-export                         # configs only (safe to share)
+export                         # configs only
 export --include-secrets       # full export with keys and tokens
-# Output: ~/vps-export-YYYYMMDD.tar.gz
 
 # Restore on new server:
 scp ~/vps-export-*.tar.gz ubuntu@<new-server>:~/
@@ -245,8 +299,8 @@ tar -xzf vps-export-*.tar.gz && cd vps-export-* && bash restore.sh
 
 ## Update Protocol
 
-After **any** change to this computer:
+After **any** change:
 ```bash
 map
 ```
-This regenerates `README.md` so every agent starts with accurate info.
+This regenerates `README.md` so every agent always starts with accurate info.

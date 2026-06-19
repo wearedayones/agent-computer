@@ -20,8 +20,11 @@ log_move() {
 move_file() {
   local path="$1"
   local name="$2"
-  local ext="${name##*.}"
   local dest=""
+
+  # Get extension — if no dot in name, ext equals name (no extension)
+  local ext=""
+  [[ "$name" == *.* ]] && ext="${name##*.}" || ext=""
 
   case "${ext,,}" in
     jpg|jpeg|png|gif|webp|svg|ico|bmp|tiff)
@@ -45,6 +48,16 @@ move_file() {
       fi ;;
     json|py|js|ts|yaml|yml|toml|env|cfg|conf)
       dest="$HOME_DIR/downloads" ;;
+    "")
+      # No extension — check if it looks like text, move to downloads with .txt
+      if file "$path" 2>/dev/null | grep -qiE "text|ASCII|UTF"; then
+        dest="$HOME_DIR/downloads"
+        mkdir -p "$dest"
+        mv "$path" "$dest/${name}.txt" 2>/dev/null && log_move "~/$name" "downloads/${name}.txt" && moved=$((moved+1))
+        return
+      else
+        dest="$HOME_DIR/downloads"
+      fi ;;
     *)
       dest="$HOME_DIR/downloads" ;;
   esac
