@@ -8,7 +8,8 @@ warn() { echo -e "  ${YELLOW}⚠${NC} $1"; }
 fail() { echo -e "  ${RED}✗${NC} $1"; }
 section() { echo -e "\n${BOLD}${BLUE}── $1${NC}"; }
 
-echo -e "${BOLD}Agent Computer — Health Report${NC}"
+VERSION=$(cat /home/ubuntu/system/.version 2>/dev/null || echo "unknown")
+echo -e "${BOLD}Agent Computer v${VERSION} — Health Report${NC}"
 echo "$(date -u '+%Y-%m-%d %H:%M UTC')"
 
 # ── Disk ──────────────────────────────────────────────────────────────────────

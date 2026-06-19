@@ -79,8 +79,15 @@ done
 # Make everything executable
 chmod +x "$HOME_DIR/bin/"* "$HOME_DIR/system/"*.sh "$HOME_DIR/scripts/"*.sh 2>/dev/null
 
-# Update version
+# Update version and lock file
 echo "$REMOTE_VERSION" > "$VERSION_FILE"
+cat > "$HOME_DIR/system/.installed" <<LOCK
+  Installed:  $(cat "$HOME_DIR/system/.installed" 2>/dev/null | grep 'Installed:' | sed 's/.*Installed: *//' || echo "unknown")
+  Version:    v$REMOTE_VERSION
+  Updated:    $(date -u '+%Y-%m-%d %H:%M UTC')
+  Server:     $(hostname)
+  Source:     $REPO_URL
+LOCK
 
 log "Updated to v$REMOTE_VERSION successfully"
 
