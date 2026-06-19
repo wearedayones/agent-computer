@@ -1,0 +1,4 @@
+#!/bin/bash
+# run <channel> <short|long> [HHMM] [--no-upload]
+# Shortcut for social-factory pipeline
+exec /home/ubuntu/apps/social-factory/scripts/run.sh "$@"

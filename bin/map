@@ -1,0 +1,3 @@
+#!/bin/bash
+# map — refresh README.md with live system state
+exec bash /home/ubuntu/scripts/vps-map.sh "$@"

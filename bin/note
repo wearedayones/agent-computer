@@ -1,0 +1,15 @@
+#!/bin/bash
+# note "your message" — leave a note in ~/inbox/ for the next agent
+MSG="${1:-}"
+if [ -z "$MSG" ]; then
+  echo "Usage: note \"your message\""
+  echo "Recent inbox:"
+  ls -lt /home/ubuntu/inbox/*.md 2>/dev/null | head -5 | awk '{print $NF}' | xargs -I{} sh -c 'echo "---"; cat {}'
+  exit 0
+fi
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+DATE=$(date -u +%Y-%m-%d)
+AGENT="${AGENT_NAME:-claude}"
+FILE="/home/ubuntu/inbox/${DATE}-${AGENT}.md"
+echo "[$TS] $MSG" >> "$FILE"
+echo "Note saved → $FILE"

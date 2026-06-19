@@ -1,0 +1,3 @@
+#!/bin/bash
+# export [--include-secrets] — package everything for server migration
+exec bash /home/ubuntu/scripts/vps-export.sh "$@"
