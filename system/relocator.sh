@@ -112,30 +112,23 @@ done
 
 # ── also scan common wrong locations ─────────────────────────────────────────
 
-# Images dropped into ~/documents/
-for f in "$HOME_DIR/documents"/*.{jpg,jpeg,png,gif,webp,mp4,mov,mp3,wav} 2>/dev/null; do
+# Media files dropped into ~/documents/ or ~/downloads/
+while IFS= read -r f; do
   [ -f "$f" ] || continue
   name=$(basename "$f")
+  src_dir=$(dirname "$f")
   ext="${name##*.}"
   case "${ext,,}" in
-    jpg|jpeg|png|gif|webp)
+    jpg|jpeg|png|gif|webp|svg|ico)
       mkdir -p "$HOME_DIR/media/images"
-      mv "$f" "$HOME_DIR/media/images/$name" && log_move "~/documents/$name" "~/media/images/$name" && moved=$((moved+1)) ;;
-    mp4|mov)
+      mv "$f" "$HOME_DIR/media/images/$name" && log_move "${src_dir#$HOME_DIR/}/$name" "~/media/images/$name" && moved=$((moved+1)) ;;
+    mp4|mov|avi|mkv|webm)
       mkdir -p "$HOME_DIR/media/videos"
-      mv "$f" "$HOME_DIR/media/videos/$name" && log_move "~/documents/$name" "~/media/videos/$name" && moved=$((moved+1)) ;;
-    mp3|wav)
+      mv "$f" "$HOME_DIR/media/videos/$name" && log_move "${src_dir#$HOME_DIR/}/$name" "~/media/videos/$name" && moved=$((moved+1)) ;;
+    mp3|wav|ogg|flac|aac)
       mkdir -p "$HOME_DIR/media/audio"
-      mv "$f" "$HOME_DIR/media/audio/$name" && log_move "~/documents/$name" "~/media/audio/$name" && moved=$((moved+1)) ;;
+      mv "$f" "$HOME_DIR/media/audio/$name" && log_move "${src_dir#$HOME_DIR/}/$name" "~/media/audio/$name" && moved=$((moved+1)) ;;
   esac
-done
-
-# Videos dropped into ~/downloads/ (move to media/videos)
-for f in "$HOME_DIR/downloads"/*.{mp4,mov,avi,mkv} 2>/dev/null; do
-  [ -f "$f" ] || continue
-  name=$(basename "$f")
-  mkdir -p "$HOME_DIR/media/videos"
-  mv "$f" "$HOME_DIR/media/videos/$name" && log_move "~/downloads/$name" "~/media/videos/$name" && moved=$((moved+1))
-done
+done < <(find "$HOME_DIR/documents" "$HOME_DIR/downloads" -maxdepth 1 -type f 2>/dev/null)
 
 [ "$moved" -gt 0 ] && echo "[relocator] $moved item(s) relocated" || true
