@@ -64,6 +64,11 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 | `cron del <n>` | Remove cron job number n |
 | `msg <agent> "text"` | Send a message to a specific agent's inbox |
 | `msg list` | Show registered agents and their inboxes |
+| `cfg list [app]` | List apps with .env, or keys inside one app |
+| `cfg get <app> <KEY>` | Read a config value |
+| `cfg set <app> <KEY> <value>` | Set or update a config value |
+| `cfg show <app>` | Print full .env with values |
+| `cfg del <app> <KEY>` | Remove a key |
 
 ---
 

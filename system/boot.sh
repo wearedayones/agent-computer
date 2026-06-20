@@ -58,10 +58,11 @@ else
   echo "  Inbox:     empty"
 fi
 
-# ── Last changelog ────────────────────────────────────────────────────────────
+# ── Last changelog (skip relocator noise) ────────────────────────────────────
 echo -e "\n${BLUE}── Last 3 Changes${NC}"
 if [ -f "$HOME/documents/changelog.md" ]; then
-  grep "^-" "$HOME/documents/changelog.md" | tail -3 | sed 's/^/  /'
+  CHANGES=$(grep "^-" "$HOME/documents/changelog.md" 2>/dev/null | grep -v "Auto-relocated" | tail -3)
+  [ -n "$CHANGES" ] && echo "$CHANGES" | sed 's/^/  /' || echo "  (no meaningful changes yet)"
 else
   echo "  (no changelog yet)"
 fi

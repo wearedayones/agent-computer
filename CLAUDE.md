@@ -145,3 +145,4 @@ Add this computer's protected paths below (customize per installation):
 | `mcp list/add/status` | MCP server management |
 | `cron list/add/del` | Manage cron jobs by number |
 | `msg <agent> "text"` | Message a specific agent's inbox |
+| `cfg set/get/show <app>` | Manage .env config files for apps |

@@ -1,0 +1,124 @@
+#!/bin/bash
+# cfg — manage .env config files for apps in ~/apps/
+# Usage: cfg list [app]                — list apps with .env, or keys in one app
+#        cfg get <app> <KEY>           — print a value
+#        cfg set <app> <KEY> <value>   — set or update a key
+#        cfg del <app> <KEY>           — remove a key
+#        cfg show <app>                — print full .env (values visible)
+#        cfg edit <app>                — open .env in $EDITOR
+
+APPS_DIR="$HOME/apps"
+
+resolve_env() {
+  local app="$1"
+  # Accept full path, app name, or app name with .env
+  if [ -f "$app" ]; then echo "$app"; return; fi
+  if [ -f "$APPS_DIR/$app/.env" ]; then echo "$APPS_DIR/$app/.env"; return; fi
+  if [ -f "$APPS_DIR/$app" ]; then echo "$APPS_DIR/$app"; return; fi
+  echo ""
+}
+
+cmd="${1:-list}"
+
+case "$cmd" in
+  list)
+    if [ -n "$2" ]; then
+      # list keys in one app
+      path=$(resolve_env "$2")
+      [ -z "$path" ] && { echo "  No .env found for '$2' in ~/apps/"; exit 1; }
+      echo ""
+      echo "  $2 — keys:"
+      grep -v "^#" "$path" | grep -v "^[[:space:]]*$" | cut -d= -f1 | sed 's/^/  /'
+      echo ""
+    else
+      # list all apps that have a .env
+      echo ""
+      found=0
+      for d in "$APPS_DIR"/*/; do
+        [ -f "$d/.env" ] || continue
+        name=$(basename "$d")
+        count=$(grep -c "^[^#]" "$d/.env" 2>/dev/null || echo 0)
+        echo "  $name  ($count keys)"
+        found=$((found+1))
+      done
+      [ "$found" -eq 0 ] && echo "  (no apps have a .env file yet)"
+      echo ""
+    fi
+    ;;
+
+  get)
+    [ -z "$2" ] && { echo "Usage: cfg get <app> <KEY>"; exit 1; }
+    [ -z "$3" ] && { echo "Usage: cfg get <app> <KEY>"; exit 1; }
+    path=$(resolve_env "$2")
+    [ -z "$path" ] && { echo "  No .env found for '$2'"; exit 1; }
+    key="$3"
+    value=$(grep -m1 "^${key}=" "$path" 2>/dev/null | cut -d= -f2-)
+    if [ -z "$value" ]; then
+      echo "  (key '$key' not found in $2)"
+      exit 1
+    fi
+    echo "$value"
+    ;;
+
+  set)
+    [ -z "$2" ] && { echo "Usage: cfg set <app> <KEY> <value>"; exit 1; }
+    [ -z "$3" ] && { echo "Usage: cfg set <app> <KEY> <value>"; exit 1; }
+    app="$2"; key="$3"; shift 3; value="$*"
+    path="$APPS_DIR/$app/.env"
+    mkdir -p "$APPS_DIR/$app"
+    touch "$path"
+    if grep -q "^${key}=" "$path" 2>/dev/null; then
+      # Update existing key (portable sed)
+      tmp=$(mktemp)
+      grep -v "^${key}=" "$path" > "$tmp"
+      echo "${key}=${value}" >> "$tmp"
+      mv "$tmp" "$path"
+      echo "  ✓  Updated $key in $app"
+    else
+      echo "${key}=${value}" >> "$path"
+      echo "  ✓  Set $key in $app"
+    fi
+    ;;
+
+  del|delete|rm)
+    [ -z "$2" ] && { echo "Usage: cfg del <app> <KEY>"; exit 1; }
+    [ -z "$3" ] && { echo "Usage: cfg del <app> <KEY>"; exit 1; }
+    path=$(resolve_env "$2")
+    [ -z "$path" ] && { echo "  No .env found for '$2'"; exit 1; }
+    key="$3"
+    if ! grep -q "^${key}=" "$path" 2>/dev/null; then
+      echo "  (key '$key' not found)"; exit 1
+    fi
+    tmp=$(mktemp)
+    grep -v "^${key}=" "$path" > "$tmp"
+    mv "$tmp" "$path"
+    echo "  ✓  Removed $key from $2"
+    ;;
+
+  show)
+    [ -z "$2" ] && { echo "Usage: cfg show <app>"; exit 1; }
+    path=$(resolve_env "$2")
+    [ -z "$path" ] && { echo "  No .env found for '$2'"; exit 1; }
+    echo ""
+    echo "  $2 — $path"
+    echo "  ──────────────────────────────────────────"
+    cat "$path" | sed 's/^/  /'
+    echo ""
+    ;;
+
+  edit)
+    [ -z "$2" ] && { echo "Usage: cfg edit <app>"; exit 1; }
+    path=$(resolve_env "$2")
+    if [ -z "$path" ]; then
+      path="$APPS_DIR/$2/.env"
+      mkdir -p "$APPS_DIR/$2"
+      touch "$path"
+    fi
+    "${EDITOR:-nano}" "$path"
+    ;;
+
+  *)
+    echo "Usage: cfg list|get|set|del|show|edit <app> [KEY] [value]"
+    exit 1
+    ;;
+esac
