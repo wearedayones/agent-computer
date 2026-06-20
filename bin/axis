@@ -580,9 +580,16 @@ EOF
 
   hdr "Cron"
   if [ -f "$snap/crontab.txt" ]; then
-    diff <(cat "$snap/crontab.txt") <(crontab -l 2>/dev/null) | \
-      grep "^[<>]" | sed 's/^< /  \x1b[31m-\x1b[0m  /;s/^> /  \x1b[32m+\x1b[0m  /' \
-      || echo -e "    ${DIM}(no change)${NC}"
+    local cron_diff
+    cron_diff=$(diff <(cat "$snap/crontab.txt") <(crontab -l 2>/dev/null) | grep "^[<>]" | \
+      sed 's/^< /  \x1b[31m-\x1b[0m  /;s/^> /  \x1b[32m+\x1b[0m  /' || true)
+    if [ -n "$cron_diff" ]; then
+      echo "$cron_diff"
+    else
+      echo -e "    ${DIM}(no change)${NC}"
+    fi
+  else
+    echo -e "    ${DIM}(no snapshot to compare)${NC}"
   fi
   echo ""
 }

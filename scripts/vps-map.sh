@@ -175,7 +175,7 @@ manifest = {
     "tmux_sessions": [s.strip() for s in "$TMUX_LIST".split(",") if s.strip() and s.strip() != "none"],
     "cron_count": int("$CRON_COUNT"),
     "sync": "$SYNC_STATUS",
-    "venvs": [v for v in "$VENVS_LIST".split() if v],
+    "venvs": [v for v in "$VENVS_LIST".split() if v and v != "none"],
     "projects": [p for p in "$PROJECTS_LIST".split() if p and p != "none"],
     "open_tasks": $OPEN_COUNT,
 }

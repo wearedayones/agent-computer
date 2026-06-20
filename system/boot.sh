@@ -19,7 +19,8 @@ DISK_FREE_GB=$(df -BG "$HOME" | awk 'NR==2{gsub("G","",$4); print $4}')
 TMUX_LIST=$(tmux ls 2>/dev/null | awk -F: '{print $1}' | tr '\n' ' ' | sed 's/ $//')
 CRON_COUNT=$(crontab -l 2>/dev/null | grep -v "^#" | grep -v "^$" | wc -l)
 INBOX=$(ls "$HOME/inbox/"*.md 2>/dev/null | wc -l)
-LAST_SYNC_TS=$(grep -o '\[.*\]' "$HOME/documents/sync.log" 2>/dev/null | tail -1 | tr -d '[]' || echo "never")
+LAST_SYNC_TS=$(grep -o '\[.*\]' "$HOME/documents/sync.log" 2>/dev/null | tail -1 | tr -d '[]')
+[ -z "$LAST_SYNC_TS" ] && LAST_SYNC_TS="not configured"
 
 echo -e "${BLUE}── Pulse${NC}"
 

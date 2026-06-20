@@ -36,6 +36,7 @@ case "${1:-create}" in
     [ -f "$target/memory.json" ] && cp "$target/memory.json" "$SYSTEM/memory.json" && echo "  ✓  memory.json restored"
     [ -f "$target/tasks.json"  ] && cp "$target/tasks.json"  "$SYSTEM/tasks.json"  && echo "  ✓  tasks.json restored"
     [ -f "$target/budget.json" ] && cp "$target/budget.json" "$SYSTEM/budget.json" && echo "  ✓  budget.json restored"
+    [ -f "$target/plan.md"     ] && cp "$target/plan.md"     "$SYSTEM/plan.md"     && echo "  ✓  plan.md restored"
     echo "  Done."
     ;;
 
@@ -47,6 +48,7 @@ case "${1:-create}" in
     [ -f "$SYSTEM/memory.json" ] && cp "$SYSTEM/memory.json" "$SNAP_DIR/" && echo "  ✓  memory.json"
     [ -f "$SYSTEM/tasks.json"  ] && cp "$SYSTEM/tasks.json"  "$SNAP_DIR/" && echo "  ✓  tasks.json"
     [ -f "$SYSTEM/budget.json" ] && cp "$SYSTEM/budget.json" "$SNAP_DIR/" && echo "  ✓  budget.json"
+    [ -f "$SYSTEM/plan.md"     ] && cp "$SYSTEM/plan.md"     "$SNAP_DIR/" && echo "  ✓  plan.md"
 
     crontab -l 2>/dev/null > "$SNAP_DIR/crontab.txt" && echo "  ✓  crontab.txt"
 
