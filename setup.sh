@@ -198,9 +198,12 @@ else
 fi
 
 # /usr/local/bin for all shell types (non-interactive, Claude Code, cron, etc.)
+# v4.0 internal scripts (axis subcommands only — not standalone): envdata ctx trace metric
+AXIS_ONLY="envdata ctx trace metric"
 LINKED=0
 for cmd in "$HOME_DIR/bin/"*; do
   fname="$(basename "$cmd")"
+  echo "$AXIS_ONLY" | grep -qw "$fname" && continue
   if sudo ln -sf "$cmd" "/usr/local/bin/$fname" 2>/dev/null; then
     LINKED=$((LINKED + 1))
   fi

@@ -167,8 +167,10 @@ cmd_doctor() {
   ok "All commands present in ~/bin/"
 
   local missing_links=0
+  local axis_only="envdata ctx trace metric"
   for cmd in "$H/bin/"*; do
     name=$(basename "$cmd")
+    echo "$axis_only" | grep -qw "$name" && continue
     [ -L "/usr/local/bin/$name" ] || missing_links=$((missing_links+1))
   done
   if [ "$missing_links" -eq 0 ]; then
