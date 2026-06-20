@@ -82,6 +82,16 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 | `note clear` | Remove all inbox messages |
 | `run list` | Show runnable apps (auto-detected by start script) |
 | `run <app>` | Start an app via its run/start script |
+| `axis doctor` | Full diagnostics — infra, cron, agents, disk, deps |
+| `axis ps` | Running tmux sessions, cron queue, background processes |
+| `axis size` | Disk usage by zone with bar chart |
+| `axis clean [--force]` | Dry-run (or apply) cleanup of old files, caches, logs |
+| `axis start/stop/restart <app>` | App lifecycle via tmux sessions |
+| `axis diff` | Changes since last snapshot (tasks, memory, cron) |
+| `axis alert` | Scan all app alert logs for errors and failures |
+| `axis ports` | Show listening ports (`ss -tlnp`) |
+| `axis sync` | Trigger GitHub backup now |
+| `axis history [n]` | Last n meaningful changelog events (noise filtered) |
 
 ---
 

@@ -1,228 +1,737 @@
 #!/bin/bash
-# axis — Agent Computer CLI
+# axis — Agent Computer CLI  v3.4.0
 # The single command that IS your computer.
-# Usage: axis [command] [args...]
 
 BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; MAGENTA='\033[0;35m'
-WHITE='\033[1;37m'
+BLUE='\033[0;34m'; CYAN='\033[0;36m'; WHITE='\033[1;37m'
 
 VERSION=$(cat "$HOME/system/.version" 2>/dev/null || echo "?")
-HOME_DIR="$HOME"
+H="$HOME"
 
-# ── Status dashboard (default) ────────────────────────────────────────────────
+ok()   { echo -e "  ${GREEN}✓${NC}  $*"; }
+warn() { echo -e "  ${YELLOW}⚠${NC}  $*"; }
+fail() { echo -e "  ${RED}✗${NC}  $*"; }
+hdr()  { echo -e "\n  ${BOLD}${BLUE}$*${NC}"; }
+bar()  { echo -e "  ${DIM}──────────────────────────────────────────${NC}"; }
+
+# ── Status dashboard ──────────────────────────────────────────────────────────
 cmd_status() {
-  local NOW
+  local NOW DISK_FREE DISK_PCT DISK_FREE_GB SESSIONS CRON_COUNT INBOX_COUNT
   NOW=$(date -u '+%Y-%m-%d %H:%M UTC')
+  DISK_FREE=$(df -h "$H" | awk 'NR==2{print $4}')
+  DISK_PCT=$(df "$H"  | awk 'NR==2{print $5}')
+  DISK_FREE_GB=$(df -BG "$H" | awk 'NR==2{gsub("G","",$4); print $4}')
+  SESSIONS=$(tmux ls 2>/dev/null | awk -F: '{print $1}' | tr '\n' '  ' | sed 's/  $//')
+  CRON_COUNT=$(crontab -l 2>/dev/null | grep -vc "^#\|^$")
+  INBOX_COUNT=$(find "$H/inbox/" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
 
-  # Collect data
-  local DISK_FREE DISK_PCT DISK_FREE_GB
-  DISK_FREE=$(df -h "$HOME_DIR" | awk 'NR==2{print $4}')
-  DISK_PCT=$(df "$HOME_DIR" | awk 'NR==2{print $5}')
-  DISK_FREE_GB=$(df -BG "$HOME_DIR" | awk 'NR==2{gsub("G","",$4); print $4}')
+  local OPEN_TASKS=0 TASK_LINES="" PLAN_TITLE="" BUDGET_LINE="" MEMORY_COUNT=0 AGENT_STATUS=""
 
-  local SESSIONS CRON_COUNT INBOX_COUNT
-  SESSIONS=$(tmux ls 2>/dev/null | awk -F: '{print $1}' | tr '\n' ' ' | sed 's/ $//' || echo "none")
-  CRON_COUNT=$(crontab -l 2>/dev/null | grep -v "^#" | grep -v "^$" | wc -l | tr -d ' ')
-  INBOX_COUNT=$(find "$HOME_DIR/inbox/" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
-
-  local OPEN_TASKS TASK_LIST PLAN_TITLE BUDGET_MONTH
-  OPEN_TASKS=0; TASK_LIST=""; PLAN_TITLE=""
-
-  if [ -f "$HOME_DIR/system/tasks.json" ]; then
-    OPEN_TASKS=$(python3 -c "
+  [ -f "$H/system/tasks.json" ] && \
+    OPEN_TASKS=$(python3 -c "import json; d=json.load(open('$H/system/tasks.json')); print(len([t for t in d.get('tasks',[]) if t.get('status')=='open']))" 2>/dev/null | tr -d ' \n') && \
+    TASK_LINES=$(python3 -c "
 import json
-with open('$HOME_DIR/system/tasks.json') as f: d=json.load(f)
-tasks=[t for t in d.get('tasks',[]) if t.get('status')=='open']
-print(len(tasks))
-" 2>/dev/null | tr -d ' \n')
-    [ -z "$OPEN_TASKS" ] && OPEN_TASKS=0
-    if [ "$OPEN_TASKS" -gt 0 ]; then
-      TASK_LIST=$(python3 -c "
-import json
-with open('$HOME_DIR/system/tasks.json') as f: d=json.load(f)
-for t in d.get('tasks',[]):
-    if t.get('status')=='open':
-        print(f\"  {t['id']:>3}  {t['desc']}\")
+with open('$H/system/tasks.json') as f: d=json.load(f)
+for t in [x for x in d.get('tasks',[]) if x.get('status')=='open'][:4]:
+    print(f\"    \033[33m○\033[0m  #{t['id']}  {t['desc']}\")
 " 2>/dev/null)
-    fi
-  fi
+  [ -z "$OPEN_TASKS" ] && OPEN_TASKS=0
 
-  if [ -f "$HOME_DIR/system/plan.md" ]; then
-    PLAN_TITLE=$(head -1 "$HOME_DIR/system/plan.md" | sed 's/^# Plan: //')
-  fi
+  [ -f "$H/system/plan.md" ] && PLAN_TITLE=$(head -1 "$H/system/plan.md" | sed 's/^# Plan: //')
 
-  BUDGET_MONTH=$(python3 -c "
+  [ -f "$H/system/budget.json" ] && BUDGET_LINE=$(python3 -c "
 import json
-from datetime import datetime, timezone
-try:
-  with open('$HOME_DIR/system/budget.json') as f: d=json.load(f)
-  m=datetime.now(timezone.utc).strftime('%Y-%m')
-  total=sum(e['amount'] for e in d.get('entries',[]) if e.get('month')==m)
-  print(f'\${total:.4f}') if total else print('none')
-except: print('none')
+from datetime import datetime,timezone
+d=json.load(open('$H/system/budget.json'))
+m=datetime.now(timezone.utc).strftime('%Y-%m')
+e=[x for x in d.get('entries',[]) if x.get('month')==m]
+t=sum(x['amount'] for x in e)
+print(f'\${t:.4f} across {len(e)} entries') if e else print('none')
 " 2>/dev/null)
 
-  local AGENT_STATUS=""
-  if [ -f "$HOME_DIR/system/agents.json" ]; then
-    AGENT_STATUS=$(python3 - "$HOME_DIR/system/agents.json" <<'EOF'
-import json, sys, subprocess
-with open(sys.argv[1]) as f: d = json.load(f)
-agents = d.get("agents", {})
+  [ -f "$H/system/memory.json" ] && \
+    MEMORY_COUNT=$(python3 -c "import json; print(len(json.load(open('$H/system/memory.json'))))" 2>/dev/null)
+
+  [ -f "$H/system/agents.json" ] && AGENT_STATUS=$(python3 - "$H/system/agents.json" <<'EOF'
+import json,sys,subprocess
+d=json.load(open(sys.argv[1]))
+agents=d.get("agents",{})
 if not agents: print("none registered"); sys.exit()
-parts = []
-for name, info in agents.items():
-    check = info.get("check", "")
-    if check:
-        r = subprocess.run(check, shell=True, capture_output=True)
-        dot = "\033[32m●\033[0m" if r.returncode == 0 else "\033[31m○\033[0m"
-    else:
-        dot = "\033[33m?\033[0m"
+parts=[]
+for name,info in agents.items():
+    chk=info.get("check","")
+    dot="\033[32m●\033[0m" if (chk and subprocess.run(chk,shell=True,capture_output=True).returncode==0) else "\033[31m○\033[0m" if chk else "\033[33m?\033[0m"
     parts.append(f"{dot} {name}")
 print("  ".join(parts))
 EOF
 )
-  fi
 
-  local MEMORY_COUNT=0
-  [ -f "$HOME_DIR/system/memory.json" ] && \
-    MEMORY_COUNT=$(python3 -c "import json; d=json.load(open('$HOME_DIR/system/memory.json')); print(len(d))" 2>/dev/null || echo 0)
+  # alerts from app state
+  local ALERTS=0
+  for f in "$H"/apps/*/state/alerts.log "$H"/apps/*/channels/*/state/alerts.log; do
+    [ -f "$f" ] && ALERTS=$((ALERTS + $(grep -c "ALERT\|ERROR\|FAIL" "$f" 2>/dev/null || echo 0)))
+  done
 
-  # ── Render ────────────────────────────────────────────────────────────────
   echo ""
-  echo -e "${BOLD}${CYAN}  ╔══════════════════════════════════════════════════════╗${NC}"
-  echo -e "${BOLD}${CYAN}  ║${NC}  ${WHITE}${BOLD}AXIS${NC}  ${DIM}v${VERSION}${NC}  ·  ${DIM}Agent Computer${NC}  ${BOLD}${CYAN}               ║${NC}"
-  echo -e "${BOLD}${CYAN}  ║${NC}  ${DIM}${NOW}${NC}  ${BOLD}${CYAN}                             ║${NC}"
-  echo -e "${BOLD}${CYAN}  ╚══════════════════════════════════════════════════════╝${NC}"
-  echo ""
+  printf "${BOLD}${CYAN}  ╔══════════════════════════════════════════════════════╗${NC}\n"
+  printf "${BOLD}${CYAN}  ║${NC}  ${WHITE}${BOLD}AXIS${NC}  ${DIM}v${VERSION}${NC}  ·  ${DIM}Agent Computer${NC}  ${BOLD}${CYAN}               ║${NC}\n"
+  printf "${BOLD}${CYAN}  ║${NC}  ${DIM}%-52s${NC}  ${BOLD}${CYAN}║${NC}\n" "$NOW"
+  printf "${BOLD}${CYAN}  ╚══════════════════════════════════════════════════════╝${NC}\n\n"
 
-  # System
+  # System row
+  local disk_col="$NC"
+  [ "${DISK_FREE_GB:-99}" -lt 2 ] 2>/dev/null && disk_col="$RED"
+  [ "${DISK_FREE_GB:-99}" -lt 4 ] 2>/dev/null && [ "${DISK_FREE_GB:-99}" -ge 2 ] 2>/dev/null && disk_col="$YELLOW"
   echo -e "  ${BOLD}${BLUE}System${NC}"
-  local disk_color="$NC"
-  [ "${DISK_FREE_GB:-99}" -lt 2 ] 2>/dev/null && disk_color="$RED"
-  [ "${DISK_FREE_GB:-99}" -lt 4 ] 2>/dev/null && [ "${DISK_FREE_GB:-99}" -ge 2 ] 2>/dev/null && disk_color="$YELLOW"
-  echo -e "    Disk       ${disk_color}${DISK_FREE} free (${DISK_PCT} used)${NC}"
+  echo -e "    Disk       ${disk_col}${DISK_FREE} free (${DISK_PCT} used)${NC}"
   [ -n "$SESSIONS" ] && echo -e "    Sessions   ${GREEN}${SESSIONS}${NC}" || echo -e "    Sessions   ${DIM}none${NC}"
   echo -e "    Cron       ${CRON_COUNT} active jobs"
+  [ "$ALERTS" -gt 0 ] && echo -e "    Alerts     ${RED}${ALERTS} unread — axis alert${NC}"
   echo ""
 
-  # Work
+  # Work row
   echo -e "  ${BOLD}${BLUE}Work${NC}"
-  if [ "$INBOX_COUNT" -gt 0 ]; then
-    echo -e "    Inbox      ${YELLOW}${INBOX_COUNT} message(s) — axis note list${NC}"
-  else
-    echo -e "    Inbox      ${DIM}empty${NC}"
-  fi
+  [ "$INBOX_COUNT" -gt 0 ] && echo -e "    Inbox      ${YELLOW}${INBOX_COUNT} message(s) — axis note list${NC}" \
+                             || echo -e "    Inbox      ${DIM}empty${NC}"
   if [ "$OPEN_TASKS" -gt 0 ]; then
     echo -e "    Tasks      ${YELLOW}${OPEN_TASKS} open${NC}"
-    echo "$TASK_LIST" | sed 's/^/  /' | head -5
+    [ -n "$TASK_LINES" ] && echo -e "$TASK_LINES"
   else
     echo -e "    Tasks      ${DIM}none${NC}"
   fi
-  if [ -n "$PLAN_TITLE" ]; then
-    echo -e "    Plan       ${CYAN}${PLAN_TITLE}${NC}"
-  else
-    echo -e "    Plan       ${DIM}none${NC}"
-  fi
-  echo -e "    Budget     ${DIM}${BUDGET_MONTH} this month${NC}"
+  [ -n "$PLAN_TITLE" ] && echo -e "    Plan       ${CYAN}${PLAN_TITLE}${NC}" || echo -e "    Plan       ${DIM}none${NC}"
+  echo -e "    Budget     ${DIM}${BUDGET_LINE:-none} this month${NC}"
   echo -e "    Memory     ${MEMORY_COUNT} stored facts"
   echo ""
 
-  # Agents
+  # Agents row
   echo -e "  ${BOLD}${BLUE}Agents${NC}"
-  if [ -n "$AGENT_STATUS" ]; then
-    echo -e "    ${AGENT_STATUS}"
-  else
-    echo -e "    ${DIM}none registered${NC}"
-  fi
+  [ -n "$AGENT_STATUS" ] && echo -e "    ${AGENT_STATUS}" || echo -e "    ${DIM}none registered${NC}"
   echo ""
 
-  # Quick
-  echo -e "  ${DIM}axis boot · axis check · axis task list · axis help${NC}"
+  echo -e "  ${DIM}axis help · axis doctor · axis ps · axis check${NC}"
+  echo ""
+}
+
+# ── Doctor — deep diagnostics ─────────────────────────────────────────────────
+cmd_doctor() {
+  local ERRORS=0 WARNS=0
+  echo ""
+  echo -e "${BOLD}${CYAN}  AXIS DOCTOR — System Diagnostics${NC}"
+  bar
+
+  # Infrastructure
+  hdr "Infrastructure"
+  local v
+  v=$(cat "$H/system/.version" 2>/dev/null || echo "?")
+  ok "axis v${v} installed"
+
+  for doc in AGENT.md CLAUDE.md README.md; do
+    if [ -L "/$doc" ] && [ -f "/$doc" ]; then
+      ok "/$doc → $(readlink /$doc)"
+    else
+      fail "/$doc symlink missing — run: sudo ln -sf ~/$doc /$doc"
+      ERRORS=$((ERRORS+1))
+    fi
+  done
+
+  for cmd in boot check map note task memory budget log snapshot secret plan agent mcp cron cfg watch run msg axis; do
+    if [ ! -f "$H/bin/$cmd" ]; then
+      fail "~/bin/$cmd missing"
+      ERRORS=$((ERRORS+1))
+    fi
+  done
+  ok "All commands present in ~/bin/"
+
+  local missing_links=0
+  for cmd in "$H/bin/"*; do
+    name=$(basename "$cmd")
+    [ -L "/usr/local/bin/$name" ] || missing_links=$((missing_links+1))
+  done
+  if [ "$missing_links" -eq 0 ]; then
+    ok "All commands linked to /usr/local/bin/"
+  else
+    warn "$missing_links command(s) not in /usr/local/bin/ — run: axis update"
+    WARNS=$((WARNS+1))
+  fi
+
+  if [ -f /etc/bash_completion.d/axis ]; then
+    ok "Tab completion installed"
+  else
+    warn "Tab completion not installed — run: sudo cp ~/system/axis-completion.bash /etc/bash_completion.d/axis"
+    WARNS=$((WARNS+1))
+  fi
+
+  # Auto-update
+  hdr "Auto-Update"
+  local update_log="$H/system/update.log"
+  if [ -f "$update_log" ]; then
+    local last_run
+    last_run=$(stat -c %Y "$update_log" 2>/dev/null || stat -f %m "$update_log" 2>/dev/null)
+    local now_ts
+    now_ts=$(date +%s)
+    local age=$(( (now_ts - last_run) / 60 ))
+    [ "$age" -lt 30 ] && ok "Auto-update ran ${age}m ago" \
+      || warn "Auto-update log is ${age}m old — cron may not be running"
+  else
+    warn "No update log found"; WARNS=$((WARNS+1))
+  fi
+
+  local remote_v
+  local src
+  src=$(cat "$H/system/.update-source" 2>/dev/null)
+  if [ -n "$src" ]; then
+    remote_v=$(curl -fsSL "${src}/raw/main/VERSION" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$remote_v" ] && [ "$remote_v" = "$v" ]; then
+      ok "Up to date (v${v})"
+    elif [ -n "$remote_v" ] && [ "$(printf '%s\n%s' "$remote_v" "$v" | sort -V | tail -1)" = "$remote_v" ] && [ "$remote_v" != "$v" ]; then
+      warn "Update available: v${v} → v${remote_v} — run: axis update"
+      WARNS=$((WARNS+1))
+    elif [ -n "$remote_v" ]; then
+      ok "Ahead of remote: local v${v}, remote v${remote_v}"
+    else
+      warn "Could not reach GitHub to check for updates"
+    fi
+  fi
+
+  # Cron
+  hdr "Cron Jobs"
+  local cron_jobs
+  cron_jobs=$(crontab -l 2>/dev/null | grep -v "^#" | grep -v "^$")
+  local total_cron
+  total_cron=$(echo "$cron_jobs" | wc -l | tr -d ' ')
+
+  for required in "auto-update" "relocator" "vps-map"; do
+    echo "$cron_jobs" | grep -q "$required" && ok "$required scheduled" \
+      || { fail "$required cron job missing"; ERRORS=$((ERRORS+1)); }
+  done
+
+  # Check for duplicates
+  local dup_count
+  dup_count=$(echo "$cron_jobs" | sort | uniq -d | wc -l | tr -d ' ')
+  [ "$dup_count" -gt 0 ] && warn "${dup_count} duplicate cron job(s) found — run: cron list" \
+    && WARNS=$((WARNS+1)) || ok "No duplicate cron jobs"
+
+  ok "$total_cron total cron jobs"
+
+  # Agents
+  hdr "Agents"
+  if [ -f "$H/system/agents.json" ]; then
+    python3 - "$H/system/agents.json" <<'EOF'
+import json,sys,subprocess
+d=json.load(open(sys.argv[1]))
+agents=d.get("agents",{})
+if not agents: print("  \033[2m  (none registered)\033[0m"); sys.exit()
+for name,info in agents.items():
+    chk=info.get("check","")
+    if chk:
+        r=subprocess.run(chk,shell=True,capture_output=True)
+        if r.returncode==0: print(f"  \033[32m✓\033[0m  {name} alive")
+        else: print(f"  \033[31m✗\033[0m  {name} DEAD — check: {chk}")
+    else:
+        print(f"  \033[33m⚠\033[0m  {name} — no check command registered")
+EOF
+  else
+    echo -e "    ${DIM}(none registered)${NC}"
+  fi
+
+  # Apps
+  hdr "Apps"
+  for d in "$H/apps"/*/; do
+    [ -d "$d" ] || continue
+    name=$(basename "$d")
+    [[ "$name" == "envs" ]] && continue
+    runner=""
+    for r in run.sh start.sh scripts/run.sh main.sh; do
+      [ -f "$d/$r" ] && runner="$r" && break
+    done
+    if [ -n "$runner" ]; then
+      # Check for recent logs
+      local recent
+      recent=$(find "$d" -name "*.log" -newer "$d/$runner" 2>/dev/null | head -1)
+      [ -n "$recent" ] && ok "$name ($runner) — logs active" \
+                        || ok "$name ($runner)"
+    else
+      warn "$name — no run script found"
+      WARNS=$((WARNS+1))
+    fi
+  done
+
+  # MCP
+  hdr "MCP Servers"
+  if [ -f "$H/.claude/claude_desktop_config.json" ]; then
+    python3 - "$H/.claude/claude_desktop_config.json" <<'EOF'
+import json,sys,shutil
+d=json.load(open(sys.argv[1]))
+servers=d.get("mcpServers",{})
+if not servers: print("    \033[2m(none configured)\033[0m"); sys.exit()
+for name,cfg in servers.items():
+    cmd=cfg.get("command","")
+    found=shutil.which(cmd) is not None
+    if found: print(f"  \033[32m✓\033[0m  {name} ({cmd} found)")
+    else: print(f"  \033[31m✗\033[0m  {name} ({cmd} NOT FOUND)")
+EOF
+  else
+    echo -e "    ${DIM}(not configured)${NC}"
+  fi
+
+  # Disk
+  hdr "Disk"
+  local free_gb
+  free_gb=$(df -BG "$H" | awk 'NR==2{gsub("G","",$4); print $4}')
+  local pct
+  pct=$(df "$H" | awk 'NR==2{print $5}')
+  local free_h
+  free_h=$(df -h "$H" | awk 'NR==2{print $4}')
+  if [ "${free_gb:-99}" -lt 2 ] 2>/dev/null; then
+    fail "Only ${free_h} free (${pct}) — CRITICAL"; ERRORS=$((ERRORS+1))
+  elif [ "${free_gb:-99}" -lt 4 ] 2>/dev/null; then
+    warn "${free_h} free (${pct}) — getting low"; WARNS=$((WARNS+1))
+  else
+    ok "${free_h} free (${pct})"
+  fi
+  # Large files in downloads
+  local big
+  big=$(find "$H/downloads/" -size +100M 2>/dev/null | wc -l | tr -d ' ')
+  [ "$big" -gt 0 ] && warn "$big file(s) >100MB in ~/downloads/ — axis clean" && WARNS=$((WARNS+1))
+
+  # Keys
+  hdr "Keys"
+  local key_count
+  key_count=$(ls "$H/keys/" 2>/dev/null | wc -l | tr -d ' ')
+  local empty_keys
+  empty_keys=$(find "$H/keys/" -empty 2>/dev/null | wc -l | tr -d ' ')
+  ok "$key_count key file(s) in ~/keys/"
+  [ "$empty_keys" -gt 0 ] && fail "$empty_keys empty key file(s)" && ERRORS=$((ERRORS+1))
+
+  # Dependencies
+  hdr "Dependencies"
+  for dep in bash python3 curl git tmux; do
+    if command -v "$dep" &>/dev/null; then
+      ok "$dep ($(command -v $dep))"
+    else
+      fail "$dep not found"
+      ERRORS=$((ERRORS+1))
+    fi
+  done
+  local py_ver
+  py_ver=$(python3 --version 2>/dev/null | awk '{print $2}')
+  ok "Python $py_ver"
+
+  # Summary
+  echo ""
+  bar
+  if [ "$ERRORS" -eq 0 ] && [ "$WARNS" -eq 0 ]; then
+    echo -e "  ${GREEN}${BOLD}✓  All checks passed${NC}"
+  else
+    [ "$ERRORS" -gt 0 ] && echo -e "  ${RED}✗  $ERRORS error(s)${NC}"
+    [ "$WARNS"  -gt 0 ] && echo -e "  ${YELLOW}⚠  $WARNS warning(s)${NC}"
+  fi
+  echo ""
+}
+
+# ── ps — process & session status ────────────────────────────────────────────
+cmd_ps() {
+  echo ""
+  hdr "Tmux Sessions"
+  local tmux_out
+  tmux_out=$(tmux ls 2>/dev/null)
+  if [ -n "$tmux_out" ]; then
+    while IFS= read -r line; do echo -e "  ${GREEN}●${NC}  $line"; done <<< "$tmux_out"
+  else
+    echo -e "    ${DIM}no sessions${NC}"
+  fi
+
+  hdr "Next Cron Fires (within 1 hour)"
+  python3 - <<'EOF'
+import subprocess,re
+from datetime import datetime,timezone
+now=datetime.now(timezone.utc)
+try:
+    result=subprocess.run(['crontab','-l'],capture_output=True,text=True)
+    lines=[l for l in result.stdout.splitlines() if l.strip() and not l.startswith('#')]
+    print(f"    {len(lines)} active jobs")
+    # Show jobs that would run in next hour (min/hour fields contain * or current)
+    for l in lines[:8]:
+        parts=l.split(None,5)
+        if len(parts)<6: continue
+        cmd=parts[5][:60]+"…" if len(parts[5])>60 else parts[5]
+        sched=" ".join(parts[:5])
+        print(f"    {sched:<22} {cmd}")
+except: pass
+EOF
+
+  hdr "Background Processes (user)"
+  local procs
+  procs=$(ps -u "$USER" --no-headers -o user,pid,cmd 2>/dev/null | \
+    grep -v " ps \| grep \|/bash\|-bash\|sshd\|tmux\|axis " | \
+    grep -v '^\[' | head -10)
+  if [ -n "$procs" ]; then
+    echo "$procs" | awk '{printf "    %-10s %-6s %s\n", $1, $2, $3}'
+  else
+    echo -e "    ${DIM}none${NC}"
+  fi
+  echo ""
+}
+
+# ── clean — safe cleanup ──────────────────────────────────────────────────────
+cmd_clean() {
+  local DRY=true
+  [ "${1:-}" = "--force" ] && DRY=false
+
+  echo ""
+  echo -e "${BOLD}${CYAN}  AXIS CLEAN${NC}  ${DIM}$([ "$DRY" = true ] && echo "dry run — use --force to apply")${NC}"
+  bar
+
+  local total_freed=0
+
+  _report() {
+    local label="$1" path="$2" size
+    size=$(du -sh "$path" 2>/dev/null | cut -f1)
+    if [ "$DRY" = true ]; then
+      warn "Would remove: $path ($size)"
+    else
+      rm -rf "$path"
+      ok "Removed: $label ($size freed)"
+    fi
+  }
+
+  hdr "Downloads older than 7 days"
+  local found=0
+  while IFS= read -r f; do
+    _report "$(basename "$f")" "$f"
+    found=$((found+1))
+  done < <(find "$H/downloads/" -maxdepth 1 -mtime +7 -not -name "." 2>/dev/null)
+  [ "$found" -eq 0 ] && ok "Downloads clean"
+
+  hdr "Old snapshots (keep last 5)"
+  local snaps
+  mapfile -t snaps < <(ls -dt "$H/archive/snapshot-"* 2>/dev/null)
+  if [ "${#snaps[@]}" -gt 5 ]; then
+    for s in "${snaps[@]:5}"; do
+      _report "$(basename "$s")" "$s"
+    done
+  else
+    ok "${#snaps[@]} snapshots (within limit)"
+  fi
+
+  hdr "__pycache__ and .pyc files in apps/"
+  local pyc_size
+  pyc_size=$(find "$H/apps/" -name "__pycache__" -o -name "*.pyc" 2>/dev/null | \
+             xargs du -sh 2>/dev/null | awk '{sum+=$1} END{print sum"K"}')
+  local pyc_count
+  pyc_count=$(find "$H/apps/" -name "__pycache__" -type d 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$pyc_count" -gt 0 ]; then
+    if [ "$DRY" = true ]; then
+      warn "Would remove $pyc_count __pycache__/ dirs in apps/"
+    else
+      find "$H/apps/" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+      find "$H/apps/" -name "*.pyc" -delete 2>/dev/null || true
+      ok "Removed $pyc_count __pycache__/ dirs"
+    fi
+  else
+    ok "No __pycache__ found"
+  fi
+
+  hdr "Log files > 50MB"
+  found=0
+  while IFS= read -r f; do
+    _report "$(basename "$f")" "$f"
+    found=$((found+1))
+  done < <(find "$H/apps/" "$H/documents/" -name "*.log" -size +50M 2>/dev/null)
+  [ "$found" -eq 0 ] && ok "No oversized logs"
+
+  echo ""
+  bar
+  if [ "$DRY" = true ]; then
+    echo -e "  ${DIM}Run 'axis clean --force' to apply${NC}"
+  else
+    ok "Cleanup complete"
+  fi
+  echo ""
+}
+
+# ── size — disk usage by zone ─────────────────────────────────────────────────
+cmd_size() {
+  echo ""
+  echo -e "${BOLD}${CYAN}  AXIS SIZE — Disk Usage${NC}"
+  bar
+
+  local total_kb
+  total_kb=$(df -k "$H" | awk 'NR==2{print $3}')
+  local disk_total
+  disk_total=$(df -h "$H" | awk 'NR==2{print $2}')
+  local disk_free
+  disk_free=$(df -h "$H" | awk 'NR==2{print $4}')
+  local disk_pct
+  disk_pct=$(df "$H" | awk 'NR==2{print $5}')
+
+  echo ""
+  printf "  %-18s %8s  %s\n" "Zone" "Size" "Bar"
+  echo -e "  ${DIM}$(printf '%.0s─' {1..50})${NC}"
+
+  for zone in apps projects media documents downloads archive scripts system bin keys inbox; do
+    dir="$H/$zone"
+    [ -d "$dir" ] || continue
+    local sz_h sz_k
+    sz_k=$(du -sk "$dir" 2>/dev/null | cut -f1)
+    sz_h=$(du -sh "$dir" 2>/dev/null | cut -f1)
+    local pct_zone=$(( sz_k * 100 / (total_kb + 1) ))
+    local bars=$(( pct_zone / 2 ))
+    local bar_str
+    bar_str=$(printf '█%.0s' $(seq 1 $((bars > 0 ? bars : 0))))
+    printf "  %-18s %8s  ${CYAN}%s${NC}\n" "$zone/" "$sz_h" "$bar_str"
+  done
+
+  echo -e "  ${DIM}$(printf '%.0s─' {1..50})${NC}"
+  echo -e "  ${BOLD}Total used: $(df -h "$H" | awk 'NR==2{print $3}') / $disk_total ($disk_pct) — $disk_free free${NC}"
+  echo ""
+}
+
+# ── start / stop / restart app ────────────────────────────────────────────────
+find_runner() {
+  local dir="$1"
+  for r in run.sh start.sh scripts/run.sh main.sh main.py; do
+    [ -f "$dir/$r" ] && echo "$dir/$r" && return
+  done
+  echo ""
+}
+
+cmd_start() {
+  local app="${1:-}"; [ -z "$app" ] && { echo "Usage: axis start <app>"; exit 1; }
+  local dir="$H/apps/$app"
+  [ ! -d "$dir" ] && { fail "App '$app' not found in ~/apps/"; exit 1; }
+  local runner
+  runner=$(find_runner "$dir")
+  [ -z "$runner" ] && { fail "No run script found in ~/apps/$app/"; exit 1; }
+  if tmux has-session -t "$app" 2>/dev/null; then
+    warn "$app is already running (tmux: $app)"
+    return
+  fi
+  tmux new-session -d -s "$app" "bash $runner"
+  ok "$app started (tmux: $app)"
+}
+
+cmd_stop() {
+  local app="${1:-}"; [ -z "$app" ] && { echo "Usage: axis stop <app>"; exit 1; }
+  if tmux has-session -t "$app" 2>/dev/null; then
+    tmux kill-session -t "$app"
+    ok "$app stopped"
+  else
+    warn "$app is not running"
+  fi
+}
+
+cmd_restart() {
+  local app="${1:-}"; [ -z "$app" ] && { echo "Usage: axis restart <app>"; exit 1; }
+  cmd_stop "$app" 2>/dev/null || true
+  sleep 1
+  cmd_start "$app"
+}
+
+# ── diff — what changed since last snapshot ───────────────────────────────────
+cmd_diff() {
+  local snap
+  snap=$(ls -dt "$H/archive/snapshot-"* 2>/dev/null | head -1)
+  if [ -z "$snap" ]; then
+    warn "No snapshots found — run: axis snapshot"
+    exit 1
+  fi
+
+  echo ""
+  echo -e "${BOLD}${CYAN}  AXIS DIFF — Changes since $(basename "$snap")${NC}"
+  bar
+
+  hdr "Tasks"
+  if [ -f "$snap/tasks.json" ] && [ -f "$H/system/tasks.json" ]; then
+    python3 - "$snap/tasks.json" "$H/system/tasks.json" <<'EOF'
+import json,sys
+old=json.load(open(sys.argv[1])); new=json.load(open(sys.argv[2]))
+old_ids={t['id']:t for t in old.get('tasks',[])}
+new_ids={t['id']:t for t in new.get('tasks',[])}
+added=[t for id,t in new_ids.items() if id not in old_ids]
+done=[t for id,t in new_ids.items() if id in old_ids and t.get('status')=='done' and old_ids[id].get('status')=='open']
+removed=[t for id,t in old_ids.items() if id not in new_ids]
+for t in added: print(f"  \033[32m+\033[0m  #{t['id']} {t['desc']}")
+for t in done:  print(f"  \033[36m✓\033[0m  #{t['id']} {t['desc']} (done)")
+for t in removed: print(f"  \033[31m-\033[0m  #{t['id']} {t['desc']}")
+if not added and not done and not removed: print("  (no change)")
+EOF
+  else
+    echo -e "    ${DIM}(no task data in snapshot)${NC}"
+  fi
+
+  hdr "Memory"
+  if [ -f "$snap/memory.json" ] && [ -f "$H/system/memory.json" ]; then
+    python3 - "$snap/memory.json" "$H/system/memory.json" <<'EOF'
+import json,sys
+old=json.load(open(sys.argv[1])); new=json.load(open(sys.argv[2]))
+for k in set(list(old)+list(new)):
+    ov=old.get(k); nv=new.get(k)
+    if ov is None: print(f"  \033[32m+\033[0m  {k}: {nv}")
+    elif nv is None: print(f"  \033[31m-\033[0m  {k}: {ov}")
+    elif ov!=nv: print(f"  \033[33m~\033[0m  {k}: {ov[:40]} → {nv[:40]}")
+if old==new: print("  (no change)")
+EOF
+  else
+    echo -e "    ${DIM}(no memory data in snapshot)${NC}"
+  fi
+
+  hdr "Cron"
+  if [ -f "$snap/crontab.txt" ]; then
+    diff <(cat "$snap/crontab.txt") <(crontab -l 2>/dev/null) | \
+      grep "^[<>]" | sed 's/^< /  \x1b[31m-\x1b[0m  /;s/^> /  \x1b[32m+\x1b[0m  /' \
+      || echo -e "    ${DIM}(no change)${NC}"
+  fi
+  echo ""
+}
+
+# ── alert — show all system alerts ───────────────────────────────────────────
+cmd_alert() {
+  echo ""
+  echo -e "${BOLD}${CYAN}  AXIS ALERT — System Alerts${NC}"
+  bar
+
+  local found=0
+  for f in "$H"/apps/*/state/alerts.log "$H"/apps/*/channels/*/state/alerts.log; do
+    [ -f "$f" ] || continue
+    local app
+    app=$(echo "$f" | sed "s|$H/apps/||;s|/state/alerts.log||;s|/channels/||")
+    local count
+    count=$(grep "ALERT\|ERROR\|FAIL" "$f" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${count:-0}" -gt 0 ]; then
+      echo -e "\n  ${RED}${BOLD}$app${NC}  (${count} alerts)"
+      grep "ALERT\|ERROR\|FAIL" "$f" | tail -5 | sed 's/^/    /'
+      found=$((found+1))
+    fi
+  done
+
+  # Changelog errors
+  if [ -f "$H/documents/changelog.md" ]; then
+    local err_count
+    err_count=$(grep -iE "error|fail|warning" "$H/documents/changelog.md" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${err_count:-0}" -gt 0 ]; then
+      echo -e "\n  ${YELLOW}${BOLD}changelog${NC}  (${err_count} entries)"
+      grep -iE "error|fail|warning" "$H/documents/changelog.md" | tail -5 | sed 's/^/    /'
+      found=$((found+1))
+    fi
+  fi
+
+  [ "$found" -eq 0 ] && echo -e "\n  ${GREEN}✓  No alerts${NC}"
+  echo ""
+}
+
+# ── ports — listening ports ───────────────────────────────────────────────────
+cmd_ports() {
+  echo ""
+  echo -e "${BOLD}${CYAN}  AXIS PORTS — Listening Services${NC}"
+  bar
+  echo ""
+  ss -tlnp 2>/dev/null | awk 'NR>1{printf "  %-25s %-20s %s\n", $4, $1, $7}' | head -20 \
+    || netstat -tlnp 2>/dev/null | awk 'NR>2{printf "  %-25s %-10s %s\n", $4, $6, $7}' | head -20 \
+    || echo -e "  ${DIM}ss/netstat not available${NC}"
+  echo ""
+}
+
+# ── sync — trigger backup ─────────────────────────────────────────────────────
+cmd_sync() {
+  echo ""
+  echo -e "${BOLD}${CYAN}  AXIS SYNC — GitHub Backup${NC}"
+  bar
+  if [ -f "$H/scripts/vps-sync.sh" ]; then
+    bash "$H/scripts/vps-sync.sh" "$@"
+  else
+    fail "~/scripts/vps-sync.sh not found — see AGENT.md for setup"
+  fi
+  echo ""
+}
+
+# ── history — activity timeline ───────────────────────────────────────────────
+cmd_history() {
+  local lines="${1:-20}"
+  echo ""
+  echo -e "${BOLD}${CYAN}  AXIS HISTORY — Last ${lines} Events${NC}"
+  bar
+  echo ""
+  if [ -f "$H/documents/changelog.md" ]; then
+    local out
+    out=$(grep "^-" "$H/documents/changelog.md" | grep -v "Auto-relocated" | tail -"$lines" | \
+      sed 's/^- \[/  [/' | \
+      sed 's/\[update\]/\x1b[36m[update]\x1b[0m/' | \
+      sed 's/DISK WARNING/\x1b[31mDISK WARNING\x1b[0m/')
+    if [ -n "$out" ]; then
+      echo "$out"
+    else
+      echo -e "  ${DIM}(no meaningful events yet — relocator noise filtered)${NC}"
+    fi
+  else
+    echo -e "  ${DIM}(no changelog yet)${NC}"
+  fi
   echo ""
 }
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 cmd_help() {
   local topic="${1:-}"
-
   if [ -n "$topic" ]; then
-    # Delegate to underlying command's help
-    if command -v "$topic" &>/dev/null; then
-      "$topic" --help 2>/dev/null || "$topic" 2>/dev/null || true
-    else
-      echo "  No help found for '$topic'"
-    fi
-    return
+    command -v "$topic" &>/dev/null && { "$topic" 2>/dev/null; return; }
+    echo -e "  No help found for '$topic'"; return
   fi
 
   echo ""
   echo -e "${BOLD}${CYAN}  AXIS v${VERSION} — Agent Computer CLI${NC}"
   echo -e "  ${DIM}Usage: axis <command> [args...]${NC}"
   echo ""
+  echo -e "  ${BOLD}${BLUE}Core${NC}"
+  echo -e "    ${CYAN}axis${NC}                     Live status dashboard"
+  echo -e "    ${CYAN}axis doctor${NC}              Deep system diagnostics — checks everything"
+  echo -e "    ${CYAN}axis ps${NC}                  Sessions, cron, background processes"
+  echo -e "    ${CYAN}axis size${NC}                Disk usage breakdown by zone"
+  echo -e "    ${CYAN}axis ports${NC}               Listening ports and services"
+  echo -e "    ${CYAN}axis history [n]${NC}         Last n activity events (default 20)"
+  echo -e "    ${CYAN}axis alert${NC}               All system and app alerts"
+  echo -e "    ${CYAN}axis clean${NC}               Preview cleanup (--force to apply)"
+  echo -e "    ${CYAN}axis sync${NC}                Trigger GitHub backup now"
+  echo -e "    ${CYAN}axis version${NC}             Version info"
+  echo ""
+  echo -e "  ${BOLD}${BLUE}Apps${NC}"
+  echo -e "    ${CYAN}axis start <app>${NC}         Start app in tmux session"
+  echo -e "    ${CYAN}axis stop <app>${NC}          Stop app's tmux session"
+  echo -e "    ${CYAN}axis restart <app>${NC}       Restart app"
+  echo -e "    ${CYAN}axis run list${NC}            Show runnable apps"
+  echo -e "    ${CYAN}axis watch <app>${NC}         Tail all logs for an app"
+  echo -e "    ${CYAN}axis watch <app> list${NC}    Show available logs"
+  echo -e "    ${CYAN}axis cfg set <app> K v${NC}   Set .env config for an app"
+  echo ""
   echo -e "  ${BOLD}${BLUE}Session${NC}"
-  echo -e "    ${CYAN}boot${NC}                     Start session — reads inbox, shows pulse"
-  echo -e "    ${CYAN}check${NC}                    Full health report"
-  echo -e "    ${CYAN}map${NC}                      Refresh README.md from live state"
-  echo -e "    ${CYAN}update${NC}                   Pull latest computer from GitHub"
+  echo -e "    ${CYAN}axis boot${NC}                Session startup"
+  echo -e "    ${CYAN}axis check${NC}               Full health report"
+  echo -e "    ${CYAN}axis map${NC}                 Refresh README"
+  echo -e "    ${CYAN}axis update${NC}              Pull latest from GitHub"
+  echo -e "    ${CYAN}axis diff${NC}                Changes since last snapshot"
+  echo -e "    ${CYAN}axis snapshot${NC}            Archive current state"
   echo ""
-  echo -e "  ${BOLD}${BLUE}Work Queue${NC}"
-  echo -e "    ${CYAN}task add${NC} \"desc\"           Add a task"
-  echo -e "    ${CYAN}task list${NC}                Show open tasks"
-  echo -e "    ${CYAN}task done${NC} <id>            Mark task complete"
-  echo -e "    ${CYAN}task clear${NC}               Remove all done tasks"
-  echo -e "    ${CYAN}plan set${NC} \"title\"          Start a session plan"
-  echo -e "    ${CYAN}plan add${NC} \"step\"           Add a step"
-  echo -e "    ${CYAN}plan show${NC}                Show active plan"
+  echo -e "  ${BOLD}${BLUE}Work & State${NC}"
+  echo -e "    ${CYAN}axis task add/list/done${NC}  Work queue"
+  echo -e "    ${CYAN}axis plan set/add/show${NC}   Session plan"
+  echo -e "    ${CYAN}axis memory set/get/list${NC} Persistent facts"
+  echo -e "    ${CYAN}axis budget log/show${NC}     Spend tracking"
+  echo -e "    ${CYAN}axis log today/week${NC}      Activity log"
   echo ""
-  echo -e "  ${BOLD}${BLUE}Memory & State${NC}"
-  echo -e "    ${CYAN}memory set${NC} key \"value\"    Persist a fact across sessions"
-  echo -e "    ${CYAN}memory get${NC} key            Recall a fact"
-  echo -e "    ${CYAN}memory list${NC}              Show all stored memories"
-  echo -e "    ${CYAN}budget log${NC} 0.05 \"desc\"    Record a spend entry"
-  echo -e "    ${CYAN}budget show${NC}              Show this month's spend"
-  echo -e "    ${CYAN}snapshot${NC}                 Archive state to ~/archive/"
-  echo ""
-  echo -e "  ${BOLD}${BLUE}Inbox & Messaging${NC}"
-  echo -e "    ${CYAN}note${NC} \"message\"            Leave a message for next agent"
-  echo -e "    ${CYAN}note list${NC}                Show inbox summaries"
-  echo -e "    ${CYAN}note read${NC}                Read full inbox"
-  echo -e "    ${CYAN}note clear${NC}               Remove all messages"
-  echo -e "    ${CYAN}msg${NC} <agent> \"text\"        Message a specific agent's inbox"
-  echo ""
-  echo -e "  ${BOLD}${BLUE}Apps & Logs${NC}"
-  echo -e "    ${CYAN}run list${NC}                 Show runnable apps"
-  echo -e "    ${CYAN}run${NC} <app>                Start an app"
-  echo -e "    ${CYAN}watch${NC} <app>              Tail all logs for an app"
-  echo -e "    ${CYAN}watch${NC} <app> list         Show available logs"
-  echo -e "    ${CYAN}cfg list${NC}                 Show apps with .env files"
-  echo -e "    ${CYAN}cfg set${NC} <app> KEY val    Set a config value"
-  echo -e "    ${CYAN}cfg show${NC} <app>           Print full .env"
-  echo -e "    ${CYAN}log today${NC}                Today's activity"
-  echo -e "    ${CYAN}log errors${NC}               Errors only"
+  echo -e "  ${BOLD}${BLUE}Messaging${NC}"
+  echo -e "    ${CYAN}axis note \"msg\"${NC}          Leave inbox message"
+  echo -e "    ${CYAN}axis note list/read/clear${NC} Manage inbox"
+  echo -e "    ${CYAN}axis msg <agent> \"txt\"${NC}   Message a specific agent"
   echo ""
   echo -e "  ${BOLD}${BLUE}Registry${NC}"
-  echo -e "    ${CYAN}agent list${NC}               Show registered agents + live status"
-  echo -e "    ${CYAN}agent add${NC} name \"desc\"     Register an agent"
-  echo -e "    ${CYAN}agent ping${NC} <name>         Check if an agent is alive"
-  echo -e "    ${CYAN}mcp list${NC}                 Show configured MCP servers"
-  echo -e "    ${CYAN}mcp add${NC} name cmd [args]   Add an MCP server"
-  echo -e "    ${CYAN}mcp status${NC}               Check which MCP commands are installed"
-  echo -e "    ${CYAN}cron list${NC}                Show cron jobs by number"
-  echo -e "    ${CYAN}cron add${NC} \"sched\" \"cmd\"    Add a cron job"
-  echo -e "    ${CYAN}cron del${NC} <n>              Remove cron job #n"
+  echo -e "    ${CYAN}axis agent list/add/ping${NC} Agent registry"
+  echo -e "    ${CYAN}axis mcp list/add/status${NC} MCP server management"
+  echo -e "    ${CYAN}axis cron list/add/del${NC}   Cron job management"
   echo ""
-  echo -e "  ${BOLD}${BLUE}Security & Migration${NC}"
-  echo -e "    ${CYAN}secret list${NC}              Show key names in ~/keys/"
-  echo -e "    ${CYAN}secret get${NC} <name>         Read a key"
-  echo -e "    ${CYAN}export${NC}                   Package computer for migration"
-  echo -e "    ${CYAN}export --include-secrets${NC}  Full export with keys"
-  echo ""
-  echo -e "  ${BOLD}${BLUE}Axiom${NC}"
-  echo -e "    ${CYAN}axis${NC}                    Status dashboard"
-  echo -e "    ${CYAN}axis version${NC}            Show version"
-  echo -e "    ${CYAN}axis help${NC} [command]      This help, or help for a command"
+  echo -e "  ${BOLD}${BLUE}Security${NC}"
+  echo -e "    ${CYAN}axis secret list/get${NC}     Safe key access"
+  echo -e "    ${CYAN}axis export${NC}              Package for migration"
   echo ""
 }
 
@@ -231,30 +740,41 @@ cmd_version() {
   echo ""
   echo -e "  ${BOLD}AXIS${NC}  v${VERSION}"
   echo -e "  ${DIM}Agent Computer — wearedayones/agent-computer${NC}"
-  echo -e "  ${DIM}Installed: $(cat "$HOME_DIR/system/.installed" 2>/dev/null | grep "Installed" | sed 's/.*Installed : //' | xargs)${NC}"
+  echo -e "  ${DIM}Installed: $(grep "Installed" "$H/system/.installed" 2>/dev/null | sed 's/.*Installed : //' | xargs)${NC}"
+  echo -e "  ${DIM}Commands:  $(ls "$H/bin/" | wc -l | tr -d ' ') in ~/bin/${NC}"
   echo ""
 }
 
-# ── Delegate to underlying command ───────────────────────────────────────────
+# ── Delegate ──────────────────────────────────────────────────────────────────
 cmd_delegate() {
   local cmd="$1"; shift
   if command -v "$cmd" &>/dev/null; then
     exec "$cmd" "$@"
-  elif [ -f "$HOME_DIR/bin/$cmd" ]; then
-    exec bash "$HOME_DIR/bin/$cmd" "$@"
+  elif [ -f "$H/bin/$cmd" ]; then
+    exec bash "$H/bin/$cmd" "$@"
   else
-    echo ""
-    echo -e "  ${RED}axis: unknown command '$cmd'${NC}"
-    echo -e "  ${DIM}Run 'axis help' to see available commands${NC}"
-    echo ""
+    echo -e "\n  ${RED}axis: unknown command '$cmd'${NC}"
+    echo -e "  ${DIM}Run 'axis help' to see all commands${NC}\n"
     exit 1
   fi
 }
 
 # ── Router ────────────────────────────────────────────────────────────────────
 case "${1:-}" in
-  ""|status)      cmd_status ;;
-  help)           shift; cmd_help "$@" ;;
-  version|--version|-v) cmd_version ;;
-  *)              cmd_delegate "$@" ;;
+  ""|status)               cmd_status ;;
+  doctor)                  cmd_doctor ;;
+  ps)                      cmd_ps ;;
+  clean)                   shift; cmd_clean "$@" ;;
+  size)                    cmd_size ;;
+  start)                   shift; cmd_start "$@" ;;
+  stop)                    shift; cmd_stop "$@" ;;
+  restart)                 shift; cmd_restart "$@" ;;
+  diff)                    cmd_diff ;;
+  alert)                   cmd_alert ;;
+  ports)                   cmd_ports ;;
+  sync)                    shift; cmd_sync "$@" ;;
+  history)                 shift; cmd_history "$@" ;;
+  help)                    shift; cmd_help "$@" ;;
+  version|--version|-v)    cmd_version ;;
+  *)                       cmd_delegate "$@" ;;
 esac
