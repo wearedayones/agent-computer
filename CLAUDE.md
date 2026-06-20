@@ -6,13 +6,42 @@
 
 ---
 
-## Session Startup (every time you arrive)
+## Session Startup — MANDATORY, NO EXCEPTIONS
+
+**Step 1: Run boot. Do it before you read anything else, before you touch any file.**
 
 ```bash
 boot
 ```
 
-If `boot` shows any alerts — **fix those first before doing anything else.**
+`boot` shows: disk health, active sessions, cron count, and **inbox messages from the previous agent**.
+If you skip it, you are flying blind. The owner will not tell you what the last agent did — that's what the inbox is for.
+
+**If `boot` shows inbox messages — read and act on them before doing anything else.**
+**If `boot` shows disk < 2GB — free space before doing anything else.**
+
+---
+
+## Session End — Write to Inbox if ANY of these are true
+
+```bash
+note "your message"    # → ~/inbox/ — next agent reads this on boot
+```
+
+**You MUST write a note if:**
+- You did meaningful work (finished a feature, fixed a bug, made a config change)
+- You left something half-done or paused mid-task
+- You discovered a problem you didn't fix
+- You changed a cron job, service, or background process
+- You modified a protected path or a shared config
+- The owner gave you a task that spans multiple sessions
+- Anything broke and you want the next agent to know
+
+**You do NOT need a note if:**
+- You only answered a question (no files changed)
+- `boot` inbox was empty and you changed nothing
+
+One note per session is enough. Be specific: what you did, what's left, what to watch for.
 
 ---
 

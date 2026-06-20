@@ -119,8 +119,41 @@ LOCK
 
 # ── add ~/bin to PATH ─────────────────────────────────────────────────────────
 if ! grep -qE '(HOME/bin|\$HOME/bin|~/bin).*PATH|PATH.*(HOME/bin|\$HOME/bin|~/bin)' "$HOME_DIR/.bashrc" 2>/dev/null; then
-  echo "→ Adding ~/bin to PATH..."
+  echo "→ Adding ~/bin to PATH in .bashrc..."
   echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME_DIR/.bashrc"
+fi
+
+# ── symlink ~/bin commands to /usr/local/bin (works in all shell types) ──────
+# This ensures commands like boot, note, map work even in non-interactive shells
+# (e.g. Claude Code's Bash tool, which doesn't source .bashrc)
+echo "→ Symlinking commands to /usr/local/bin..."
+for cmd in boot check map note update run export; do
+  [ -f "$HOME_DIR/bin/$cmd" ] && sudo ln -sf "$HOME_DIR/bin/$cmd" "/usr/local/bin/$cmd" 2>/dev/null || true
+done
+
+# ── wire Claude Code Stop hook for auto session brief ────────────────────────
+CLAUDE_SETTINGS="$HOME_DIR/.claude/settings.json"
+if [ -f "$CLAUDE_SETTINGS" ] && ! grep -q "session-brief" "$CLAUDE_SETTINGS" 2>/dev/null; then
+  echo "→ Wiring session-brief Stop hook into Claude Code settings..."
+  # Insert hooks block before closing brace
+  python3 - "$CLAUDE_SETTINGS" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    s = json.load(f)
+s.setdefault("hooks", {}).setdefault("Stop", [])
+hook_cmd = "bash " + path.replace("/.claude/settings.json", "/scripts/session-brief.sh") + " 2>>/tmp/session-brief.log"
+already = any(
+    any(h.get("command","").startswith("bash") and "session-brief" in h.get("command","")
+        for h in entry.get("hooks", []))
+    for entry in s["hooks"]["Stop"]
+)
+if not already:
+    s["hooks"]["Stop"].append({"matcher": "", "hooks": [{"type": "command", "command": hook_cmd}]})
+with open(path, "w") as f:
+    json.dump(s, f, indent=2)
+    f.write("\n")
+PYEOF
 fi
 
 # ── add cron jobs (idempotent — never duplicates) ─────────────────────────────

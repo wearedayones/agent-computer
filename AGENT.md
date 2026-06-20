@@ -122,6 +122,21 @@ cat ~/inbox/*.md    # read all messages
 
 `boot` shows inbox messages automatically on arrival.
 
+### When you MUST write a note (non-negotiable)
+
+Write a note at the end of any session where at least one of these is true:
+
+| Trigger | Example note |
+|---------|-------------|
+| Finished meaningful work | "Wired pipeline gate into orchestrator — all 23 tests pass" |
+| Left something half-done | "Producer rewrite 2/3 done — crvgrowth still uses old agy call" |
+| Found a problem you didn't fix | "Disk at 91% — downloads/ is safe to clear but I ran out of time" |
+| Changed a cron job or background process | "Added 6am gate-check cron — see crontab line 14" |
+| Something broke during your session | "LLM bridge blacklisted claude-3-haiku — check core/llm_bridge_blacklist.json" |
+| Task spans multiple sessions | "Phase 1 of 3 done — next: wire upload gate check" |
+
+If none of these apply, no note needed.
+
 **Do not** use `~/documents/` to leave messages for the next agent. Use `note`.
 
 ---

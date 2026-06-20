@@ -4,18 +4,22 @@
 
 BOLD='\033[1m'; BLUE='\033[0;34m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 
-VERSION=$(cat /home/ubuntu/system/.version 2>/dev/null || echo "?")
+VERSION=$(cat "$HOME/system/.version" 2>/dev/null || echo "?")
 
 echo -e "\n${BOLD}Agent Computer v${VERSION} — Session Start${NC}  $(date -u '+%Y-%m-%d %H:%M UTC')\n"
 
+# ── Stamp session start for auto-brief ───────────────────────────────────────
+CRON_AT_START=$(crontab -l 2>/dev/null | grep -v "^#" | grep -v "^$" | wc -l | tr -d ' ')
+printf "ts=%s\ncron=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CRON_AT_START" > "$HOME/.session_start"
+
 # ── Quick health pulse ────────────────────────────────────────────────────────
-DISK_FREE=$(df -h /home/ubuntu | awk 'NR==2{print $4}')
-DISK_PCT=$(df /home/ubuntu | awk 'NR==2{print $5}')
-DISK_FREE_GB=$(df -BG /home/ubuntu | awk 'NR==2{gsub("G","",$4); print $4}')
+DISK_FREE=$(df -h "$HOME" | awk 'NR==2{print $4}')
+DISK_PCT=$(df "$HOME" | awk 'NR==2{print $5}')
+DISK_FREE_GB=$(df -BG "$HOME" | awk 'NR==2{gsub("G","",$4); print $4}')
 TMUX_LIST=$(tmux ls 2>/dev/null | awk -F: '{print $1}' | tr '\n' ' ' | sed 's/ $//')
 CRON_COUNT=$(crontab -l 2>/dev/null | grep -v "^#" | grep -v "^$" | wc -l)
-INBOX=$(ls /home/ubuntu/inbox/*.md 2>/dev/null | wc -l)
-LAST_SYNC_TS=$(grep -o '\[.*\]' /home/ubuntu/documents/sync.log 2>/dev/null | tail -1 | tr -d '[]' || echo "never")
+INBOX=$(ls "$HOME/inbox/"*.md 2>/dev/null | wc -l)
+LAST_SYNC_TS=$(grep -o '\[.*\]' "$HOME/documents/sync.log" 2>/dev/null | tail -1 | tr -d '[]' || echo "never")
 
 echo -e "${BLUE}── Pulse${NC}"
 
@@ -41,10 +45,10 @@ echo "  Last sync: $LAST_SYNC_TS"
 # ── Inbox ─────────────────────────────────────────────────────────────────────
 if [ "$INBOX" -gt 0 ]; then
   echo -e "\n${YELLOW}── Inbox ($INBOX message(s))${NC}"
-  for f in /home/ubuntu/inbox/*.md; do
+  for f in "$HOME/inbox/"*.md; do
     [ -f "$f" ] || continue
-    echo "  $(basename $f):"
-    cat "$f" | sed 's/^/    /'
+    echo "  $(basename "$f"):"
+    sed 's/^/    /' "$f"
   done
 else
   echo "  Inbox:     empty"
@@ -52,8 +56,8 @@ fi
 
 # ── Last changelog ────────────────────────────────────────────────────────────
 echo -e "\n${BLUE}── Last 3 Changes${NC}"
-if [ -f /home/ubuntu/documents/changelog.md ]; then
-  grep "^-" /home/ubuntu/documents/changelog.md | tail -3 | sed 's/^/  /'
+if [ -f "$HOME/documents/changelog.md" ]; then
+  grep "^-" "$HOME/documents/changelog.md" | tail -3 | sed 's/^/  /'
 else
   echo "  (no changelog yet)"
 fi
