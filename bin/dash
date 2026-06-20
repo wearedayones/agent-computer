@@ -4,13 +4,16 @@
 #        axis dash stop
 #        axis dash status
 #        axis dash url
+#        axis dash tunnel [--stop]   — start/stop cloudflared quick tunnel
 
 TMUX_SESSION="dash"
+TUNNEL_SESSION="dash-tunnel"
 SERVER="$HOME/scripts/dash-server.py"
 PORT_FILE="$HOME/system/.dash-port"
 BIND_FILE="$HOME/system/.dash-bind"
+TUNNEL_URL_FILE="$HOME/system/.dash-tunnel-url"
 
-GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'; BOLD='\033[1m'
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'; BOLD='\033[1m'; DIM='\033[2m'
 
 cmd="${1:-status}"
 
@@ -39,14 +42,14 @@ case "$cmd" in
     sleep 0.6
     if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
       echo -e "  ${GREEN}✓${NC}  dash started"
-      echo -e "  ${BOLD}URL${NC}    http://${bind}:${port}"
+      echo -e "  ${BOLD}Local${NC}  http://${bind}:${port}"
       if [ "$bind" = "127.0.0.1" ]; then
         HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "<host>")
-        echo -e "  ${BOLD}Tunnel${NC} ssh -L ${port}:localhost:${port} $(whoami)@${HOST_IP}"
+        echo -e "  ${BOLD}SSH${NC}    ssh -L ${port}:localhost:${port} $(whoami)@${HOST_IP}"
+        echo -e "  ${DIM}For public URL: axis dash tunnel${NC}"
       fi
     else
-      echo -e "  ✗  dash failed to start"
-      echo "  Check: tmux attach -t dash"
+      echo -e "  ✗  dash failed to start — check: tmux attach -t dash"
       exit 1
     fi
     ;;
@@ -59,27 +62,90 @@ case "$cmd" in
     else
       echo "  (dash is not running)"
     fi
+    # Also stop tunnel if running
+    if tmux has-session -t "$TUNNEL_SESSION" 2>/dev/null; then
+      tmux kill-session -t "$TUNNEL_SESSION"
+      rm -f "$TUNNEL_URL_FILE"
+      echo -e "  ${GREEN}✓${NC}  tunnel stopped"
+    fi
     ;;
 
   status)
     if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
       port=$(cat "$PORT_FILE" 2>/dev/null || echo "2222")
       bind=$(cat "$BIND_FILE" 2>/dev/null || echo "127.0.0.1")
-      echo -e "  ${GREEN}✓${NC}  dash running — http://${bind}:${port}"
+      echo -e "  ${GREEN}✓${NC}  dash    http://${bind}:${port}"
     else
-      echo "  (dash is not running — start with: axis dash start)"
+      echo -e "  (dash is not running — start with: axis dash start)"
+    fi
+    if tmux has-session -t "$TUNNEL_SESSION" 2>/dev/null; then
+      tunnel_url=$(cat "$TUNNEL_URL_FILE" 2>/dev/null || echo "starting...")
+      echo -e "  ${GREEN}✓${NC}  tunnel  ${tunnel_url}"
+    else
+      echo -e "  (tunnel not running — start with: axis dash tunnel)"
     fi
     ;;
 
   url)
+    port=$(cat "$PORT_FILE" 2>/dev/null || echo "2222")
+    bind=$(cat "$BIND_FILE" 2>/dev/null || echo "127.0.0.1")
     if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-      port=$(cat "$PORT_FILE" 2>/dev/null || echo "2222")
-      bind=$(cat "$BIND_FILE" 2>/dev/null || echo "127.0.0.1")
-      echo "http://${bind}:${port}"
-    else
-      echo "  (dash is not running)"
+      echo "local:  http://${bind}:${port}"
+    fi
+    if tmux has-session -t "$TUNNEL_SESSION" 2>/dev/null; then
+      tunnel_url=$(cat "$TUNNEL_URL_FILE" 2>/dev/null || echo "tunnel starting...")
+      echo "tunnel: ${tunnel_url}"
+    fi
+    if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null && ! tmux has-session -t "$TUNNEL_SESSION" 2>/dev/null; then
+      echo "  (dash is not running)"; exit 1
+    fi
+    ;;
+
+  tunnel)
+    if [ "${2:-}" = "--stop" ]; then
+      if tmux has-session -t "$TUNNEL_SESSION" 2>/dev/null; then
+        tmux kill-session -t "$TUNNEL_SESSION"
+        rm -f "$TUNNEL_URL_FILE"
+        echo -e "  ${GREEN}✓${NC}  tunnel stopped"
+      else
+        echo "  (tunnel is not running)"
+      fi
+      exit 0
+    fi
+
+    if tmux has-session -t "$TUNNEL_SESSION" 2>/dev/null; then
+      tunnel_url=$(cat "$TUNNEL_URL_FILE" 2>/dev/null || echo "starting...")
+      echo -e "  ${YELLOW}⚠${NC}  tunnel already running: ${tunnel_url}"
+      exit 0
+    fi
+
+    if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+      echo -e "  ${YELLOW}⚠${NC}  dash is not running — start it first: axis dash start"
       exit 1
     fi
+
+    port=$(cat "$PORT_FILE" 2>/dev/null || echo "2222")
+    rm -f "$TUNNEL_URL_FILE"
+
+    # Start cloudflared quick tunnel; capture URL from its output
+    tmux new-session -d -s "$TUNNEL_SESSION" \
+      "cloudflared tunnel --url http://localhost:${port} --no-autoupdate 2>&1 | tee /tmp/cf-tunnel.log"
+
+    echo -e "  ${DIM}Starting cloudflared tunnel...${NC}"
+    # Wait up to 15s for URL to appear in log
+    for i in $(seq 1 30); do
+      sleep 0.5
+      url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf-tunnel.log 2>/dev/null | tail -1)
+      if [ -n "$url" ]; then
+        echo "$url" > "$TUNNEL_URL_FILE"
+        echo -e "  ${GREEN}✓${NC}  Tunnel live"
+        echo -e "  ${BOLD}URL${NC}    ${url}"
+        echo -e "  ${DIM}Persists until: axis dash tunnel --stop  or  axis dash stop${NC}"
+        exit 0
+      fi
+    done
+    echo -e "  ${YELLOW}⚠${NC}  Tunnel started but URL not captured yet"
+    echo -e "  ${DIM}Check: tmux attach -t dash-tunnel  or  cat /tmp/cf-tunnel.log${NC}"
     ;;
 
   *)
@@ -87,6 +153,7 @@ case "$cmd" in
     echo "       axis dash stop"
     echo "       axis dash status"
     echo "       axis dash url"
+    echo "       axis dash tunnel [--stop]"
     exit 1
     ;;
 esac

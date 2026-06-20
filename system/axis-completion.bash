@@ -34,7 +34,7 @@ _axis_complete() {
   local metric_sub="list show trend top"
   local skill_sub="list add show search del"
   local sched_sub="add list log pause resume run del"
-  local dash_sub="start stop status url"
+  local dash_sub="start stop status url tunnel"
   local plug_sub="list install uninstall new info"
   local sync_sub="peer push pull diff"
   local sync_peer_sub="add list ping del"
