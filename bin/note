@@ -1,15 +1,79 @@
 #!/bin/bash
-# note "your message" — leave a note in ~/inbox/ for the next agent
-MSG="${1:-}"
-if [ -z "$MSG" ]; then
-  echo "Usage: note \"your message\""
-  echo "Recent inbox:"
-  ls -lt /home/ubuntu/inbox/*.md 2>/dev/null | head -5 | awk '{print $NF}' | xargs -I{} sh -c 'echo "---"; cat {}'
-  exit 0
-fi
-TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-DATE=$(date -u +%Y-%m-%d)
-AGENT="${AGENT_NAME:-claude}"
-FILE="/home/ubuntu/inbox/${DATE}-${AGENT}.md"
-echo "[$TS] $MSG" >> "$FILE"
-echo "Note saved → $FILE"
+# note — leave messages in ~/inbox/ for the next agent
+# Usage: note "message"        — write a note
+#        note list             — show all inbox messages (summaries)
+#        note read [file]      — read a specific note or all notes
+#        note clear            — remove all notes from inbox
+
+INBOX="$HOME/inbox"
+mkdir -p "$INBOX"
+
+cmd="${1:-}"
+
+case "$cmd" in
+  list)
+    files=$(ls -t "$INBOX"/*.md 2>/dev/null)
+    if [ -z "$files" ]; then
+      echo "  (inbox is empty)"
+      exit 0
+    fi
+    echo ""
+    echo "  Inbox:"
+    echo "  ──────────────────────────────────────────"
+    while IFS= read -r f; do
+      name=$(basename "$f")
+      summary=$(grep -m1 "^\[" "$f" 2>/dev/null | head -c 100)
+      [ -z "$summary" ] && summary=$(grep -m1 "." "$f" 2>/dev/null | head -c 100)
+      echo "  $name"
+      echo "    ${summary}"
+    done <<< "$files"
+    echo ""
+    echo "  note read           — read all"
+    echo "  note read <name>    — read one"
+    echo "  note clear          — remove all"
+    echo ""
+    ;;
+
+  read)
+    target="${2:-}"
+    if [ -n "$target" ]; then
+      f="$INBOX/$target"
+      [ ! -f "$f" ] && f=$(ls "$INBOX/"*"$target"* 2>/dev/null | head -1)
+      [ -z "$f" ] || [ ! -f "$f" ] && { echo "  Note '$target' not found"; exit 1; }
+      echo ""
+      cat "$f" | sed 's/^/  /'
+      echo ""
+    else
+      files=$(ls -t "$INBOX"/*.md 2>/dev/null)
+      [ -z "$files" ] && { echo "  (inbox is empty)"; exit 0; }
+      while IFS= read -r f; do
+        echo ""
+        echo "  ── $(basename "$f") ──"
+        cat "$f" | sed 's/^/  /'
+      done <<< "$files"
+      echo ""
+    fi
+    ;;
+
+  clear)
+    count=$(ls "$INBOX"/*.md 2>/dev/null | wc -l | tr -d ' ')
+    [ "$count" -eq 0 ] && { echo "  (inbox already empty)"; exit 0; }
+    rm -f "$INBOX"/*.md
+    echo "  ✓  Cleared $count message(s) from inbox"
+    ;;
+
+  "")
+    echo "Usage: note \"message\" | list | read [file] | clear"
+    exit 1
+    ;;
+
+  *)
+    MSG="$*"
+    TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    DATE=$(date -u +%Y-%m-%d)
+    AGENT="${AGENT_NAME:-claude}"
+    FILE="$INBOX/${DATE}-${AGENT}.md"
+    echo "[$TS] $MSG" >> "$FILE"
+    echo "  ✓  Note saved → $FILE"
+    ;;
+esac

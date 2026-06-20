@@ -69,6 +69,13 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 | `cfg set <app> <KEY> <value>` | Set or update a config value |
 | `cfg show <app>` | Print full .env with values |
 | `cfg del <app> <KEY>` | Remove a key |
+| `watch <app>` | Tail all logs for an app in ~/apps/ |
+| `watch <app> list` | Show available log files for an app |
+| `note list` | Show inbox summaries |
+| `note read [file]` | Read notes in full |
+| `note clear` | Remove all inbox messages |
+| `run list` | Show runnable apps (auto-detected by start script) |
+| `run <app>` | Start an app via its run/start script |
 
 ---
 

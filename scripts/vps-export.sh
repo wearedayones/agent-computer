@@ -9,7 +9,7 @@ set -euo pipefail
 INCLUDE_SECRETS=false
 [ "${1:-}" = "--include-secrets" ] && INCLUDE_SECRETS=true
 
-HOME_DIR="/home/ubuntu"
+HOME_DIR="$HOME"
 DATE=$(date +%Y%m%d_%H%M%S)
 EXPORT_DIR=$(mktemp -d "$HOME_DIR/vps-export-${DATE}-XXXX")
 TARBALL="$HOME_DIR/vps-export-${DATE}.tar.gz"
@@ -57,6 +57,13 @@ fi
 # Root markdown files
 cp "$HOME_DIR/AGENT.md" "$HOME_DIR/CLAUDE.md" "$HOME_DIR/README.md" "$EXPORT_DIR/" 2>/dev/null || true
 
+# Agent state — the computer's brain (memory, tasks, budget, plan, agents registry)
+echo "→ Syncing agent state (memory, tasks, budget) ..."
+mkdir -p "$EXPORT_DIR/system"
+for f in memory.json tasks.json budget.json agents.json plan.md .version .update-source; do
+  [ -f "$HOME_DIR/system/$f" ] && cp "$HOME_DIR/system/$f" "$EXPORT_DIR/system/" && echo "  ✓ system/$f"
+done
+
 # Crontab snapshot
 crontab -l > "$EXPORT_DIR/crontab.txt" 2>/dev/null || true
 
@@ -99,7 +106,7 @@ cat > "$EXPORT_DIR/restore.sh" <<'RESTORE'
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOME_DIR="/home/ubuntu"
+HOME_DIR="$HOME"
 
 echo ""
 echo "═══════════════════════════════════════════════"

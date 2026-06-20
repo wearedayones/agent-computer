@@ -76,5 +76,10 @@ done
 echo "$REMOTE_VERSION" > "$VERSION_FILE"
 log "Updated to v$REMOTE_VERSION successfully"
 
+# Show what changed — pull first non-empty line after version heading in new AGENT.md
+WHATSNEW=$(awk "/^## Shell Commands/,/^---/" "$SRC/AGENT.md" 2>/dev/null | \
+           grep "^| \`" | tail -5 | sed 's/^| //;s/ |.*//' | tr '\n' ', ' | sed 's/, $//')
+[ -n "$WHATSNEW" ] && log "New/updated commands: $WHATSNEW"
+
 # Refresh README
 bash "$HOME_DIR/scripts/vps-map.sh" &>/dev/null &

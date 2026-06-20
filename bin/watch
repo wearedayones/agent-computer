@@ -1,0 +1,68 @@
+#!/bin/bash
+# watch — tail logs for an app in ~/apps/
+# Usage: watch <app>           — tail all .log files
+#        watch <app> list      — show available log files
+#        watch <app> <logname> — tail a specific log
+
+APPS_DIR="$HOME/apps"
+
+[ -z "$1" ] && {
+  echo "Usage: watch <app> [list|<logname>]"
+  echo "Apps:  $(ls "$APPS_DIR" 2>/dev/null | tr '\n' ' ')"
+  exit 1
+}
+
+app="$1"
+sub="${2:-}"
+app_dir="$APPS_DIR/$app"
+
+[ ! -d "$app_dir" ] && { echo "  App '$app' not found in ~/apps/"; exit 1; }
+
+# Find all log files
+mapfile -t logs < <(find "$app_dir" -name "*.log" -not -path "*/envs/*" -not -path "*/__pycache__/*" 2>/dev/null | sort)
+
+case "$sub" in
+  list)
+    if [ ${#logs[@]} -eq 0 ]; then
+      echo "  No .log files found in ~/apps/$app/"
+    else
+      echo ""
+      echo "  Logs for $app:"
+      for f in "${logs[@]}"; do
+        rel="${f#$app_dir/}"
+        size=$(du -sh "$f" 2>/dev/null | cut -f1)
+        echo "  $rel  ($size)"
+      done
+      echo ""
+      echo "  watch $app <logname>   tail a specific log"
+      echo "  watch $app             tail all logs"
+    fi
+    ;;
+
+  "")
+    if [ ${#logs[@]} -eq 0 ]; then
+      echo "  No .log files found in ~/apps/$app/ — try: watch $app list"
+      exit 1
+    fi
+    echo "  Watching ${#logs[@]} log(s) for $app  (Ctrl+C to stop)"
+    echo "  ──────────────────────────────────────────"
+    tail -f "${logs[@]}"
+    ;;
+
+  *)
+    # Specific log — match by name or partial path
+    match=""
+    for f in "${logs[@]}"; do
+      if [[ "$f" == *"$sub"* ]]; then
+        match="$f"; break
+      fi
+    done
+    if [ -z "$match" ]; then
+      echo "  Log '$sub' not found — run: watch $app list"
+      exit 1
+    fi
+    echo "  Watching $match  (Ctrl+C to stop)"
+    echo "  ──────────────────────────────────────────"
+    tail -f "$match"
+    ;;
+esac

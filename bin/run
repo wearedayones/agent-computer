@@ -1,12 +1,57 @@
 #!/bin/bash
-# run — shortcut for your app's main command
-# Customize this for your setup. Example:
-#   exec /home/ubuntu/apps/my-bot/scripts/run.sh "$@"
-#
-# After customizing, run: map
+# run — start an app in ~/apps/
+# Usage: run <app>             — run app's start script
+#        run <app> <args...>   — pass args to start script
+#        run list              — show runnable apps
 
-echo "No 'run' command configured."
-echo "Edit ~/bin/run to point it at your app's main script."
-echo ""
-echo "Example:"
-echo "  exec /home/ubuntu/apps/my-bot/scripts/run.sh \"\$@\""
+APPS_DIR="$HOME/apps"
+
+find_runner() {
+  local dir="$1"
+  for candidate in run.sh start.sh scripts/run.sh scripts/start.sh main.sh main.py; do
+    [ -f "$dir/$candidate" ] && echo "$dir/$candidate" && return
+  done
+  echo ""
+}
+
+case "${1:-list}" in
+  list)
+    echo ""
+    echo "  Runnable apps in ~/apps/:"
+    echo "  ──────────────────────────────────────────"
+    found=0
+    for d in "$APPS_DIR"/*/; do
+      [ -d "$d" ] || continue
+      name=$(basename "$d")
+      runner=$(find_runner "$d")
+      if [ -n "$runner" ]; then
+        rel="${runner#$d}"
+        echo "  $name  ($rel)"
+        found=$((found+1))
+      fi
+    done
+    [ "$found" -eq 0 ] && echo "  (no apps with run.sh / start.sh / main.sh found)"
+    echo ""
+    echo "  run <app>   — start an app"
+    echo ""
+    ;;
+
+  *)
+    app="$1"; shift
+    app_dir="$APPS_DIR/$app"
+    [ ! -d "$app_dir" ] && { echo "  App '$app' not found in ~/apps/"; exit 1; }
+    runner=$(find_runner "$app_dir")
+    [ -z "$runner" ] && {
+      echo "  No run script found in ~/apps/$app/"
+      echo "  Expected: run.sh, start.sh, scripts/run.sh, main.sh, or main.py"
+      exit 1
+    }
+    echo "  Starting $app via $runner"
+    echo "  ──────────────────────────────────────────"
+    if [[ "$runner" == *.py ]]; then
+      python3 "$runner" "$@"
+    else
+      bash "$runner" "$@"
+    fi
+    ;;
+esac

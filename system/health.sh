@@ -80,16 +80,13 @@ if [ -d "$ENVS_DIR" ]; then
   done
 fi
 
-# Legacy venv paths (may be symlinks)
+# Legacy venv paths — only show if NOT already a symlink into apps/envs/
 for v in $HOME/venv $HOME/yt-upload-venv $HOME/tg-agent-env $HOME/antigravity-bot-venv; do
   [ -e "$v" ] || continue
+  [ -L "$v" ] && continue   # symlink into apps/envs/ — already counted above
   name=$(basename "$v")
-  if [ -L "$v" ]; then
-    target=$(readlink -f "$v")
-    ok "$name → $target  (symlink)"
-    venv_found=$((venv_found+1))
-  elif [ -f "$v/bin/python3" ]; then
-    ok "$name  (legacy path)"
+  if [ -f "$v/bin/python3" ]; then
+    ok "$name  (legacy path — consider moving to ~/apps/envs/)"
     venv_found=$((venv_found+1))
   fi
 done
