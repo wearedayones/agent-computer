@@ -144,7 +144,7 @@ fi
 ATTENTION=""
 [ "${DISK_FREE_GB:-99}" -lt 3 ] 2>/dev/null && ATTENTION+="- **DISK LOW**: only ${DISK_FREE_GB}GB free — clear downloads/ or archive/\n"
 [ -n "$ROOT_CLUTTER" ] && ATTENTION+="- **ROOT CLUTTER**: $ROOT_CLUTTER — move to correct zone\n"
-INBOX_COUNT=$(ls "$HOME_DIR/inbox/"*.md 2>/dev/null | wc -l)
+INBOX_COUNT=$(find "$HOME_DIR/inbox/" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
 [ "$INBOX_COUNT" -gt 0 ] && ATTENTION+="- **INBOX**: $INBOX_COUNT message(s) waiting — run \`boot\` to read\n"
 OPEN_COUNT=$(python3 -c "
 import json
@@ -152,7 +152,8 @@ try:
     with open('$TASKS_FILE') as f: d=json.load(f)
     print(len([t for t in d.get('tasks',[]) if t.get('status')=='open']))
 except: print(0)
-" 2>/dev/null || echo 0)
+" 2>/dev/null | tr -d ' \n')
+[ -z "$OPEN_COUNT" ] && OPEN_COUNT=0
 [ "$OPEN_COUNT" -gt 0 ] && ATTENTION+="- **TASKS**: $OPEN_COUNT open task(s) — run \`task list\`\n"
 [ -z "$ATTENTION" ] && ATTENTION="None — all systems nominal"
 
