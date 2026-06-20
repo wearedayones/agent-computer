@@ -152,6 +152,7 @@ ZONES=(
   apps apps/envs archive bin documents downloads
   inbox keys legal media/images media/videos media/audio
   media/exports projects scripts system
+  skills plugins
 )
 for zone in "${ZONES[@]}"; do
   mkdir -p "$HOME_DIR/$zone"

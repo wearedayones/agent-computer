@@ -1,9 +1,11 @@
 #!/bin/bash
-# task — work queue surviving context resets
-# Usage: task add "description"
-#        task list
+# task — work queue surviving context resets (v2: priority, agent, blocking)
+# Usage: task add "description" [--priority high|medium|low] [--agent name] [--blocks id]
+#        task list [open|done|all] [--priority high] [--agent name]
 #        task done <id>
 #        task del <id>
+#        task assign <id> <agent>
+#        task priority <id> <high|medium|low>
 #        task clear (removes all done tasks)
 
 STORE="$HOME/system/tasks.json"
@@ -13,36 +15,89 @@ cmd="${1:-list}"
 
 case "$cmd" in
   add)
-    shift; desc="$*"
-    [ -z "$desc" ] && { echo "Usage: task add <description>"; exit 1; }
-    python3 - "$STORE" "$desc" <<'EOF'
+    shift
+    desc=""
+    priority="medium"
+    agent=""
+    blocks=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --priority) priority="$2"; shift 2 ;;
+        --agent)    agent="$2";    shift 2 ;;
+        --blocks)   blocks="$2";   shift 2 ;;
+        *) desc="${desc:+$desc }$1"; shift ;;
+      esac
+    done
+    [ -z "$desc" ] && { echo "Usage: task add \"description\" [--priority high|medium|low] [--agent name] [--blocks id]"; exit 1; }
+    python3 - "$STORE" "$desc" "$priority" "$agent" "$blocks" <<'EOF'
 import json, sys
 from datetime import datetime, timezone
-store, desc = sys.argv[1], sys.argv[2]
+store, desc, priority, agent, blocks_raw = sys.argv[1:6]
 with open(store) as f: d = json.load(f)
 tid = d["next_id"]
-d["tasks"].append({"id": tid, "desc": desc, "status": "open",
-                   "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+task = {
+    "id": tid,
+    "desc": desc,
+    "status": "open",
+    "priority": priority if priority else "medium",
+    "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+}
+if agent: task["agent"] = agent
+if blocks_raw:
+    task["blocks"] = [int(x.strip()) for x in blocks_raw.split(",") if x.strip().isdigit()]
+d["tasks"].append(task)
 d["next_id"] += 1
 with open(store, "w") as f: json.dump(d, f, indent=2)
-print(f"  \033[32m✓\033[0m  Task #{tid} added")
+pri_colors = {"high": "\033[31m", "medium": "\033[33m", "low": "\033[90m"}
+c = pri_colors.get(priority, "\033[33m")
+NC = "\033[0m"
+agent_str = f" [{agent}]" if agent else ""
+print(f"  \033[32m✓\033[0m  Task #{tid} added  {c}[{priority}]{NC}{agent_str}")
 EOF
     ;;
+
   list)
-    python3 - "$STORE" "${2:-all}" <<'EOF'
+    shift
+    filter_status="${1:-open}"
+    # consume positional, then parse flags
+    [[ "$filter_status" == --* ]] && filter_status="open" || shift 2>/dev/null
+    filter_priority=""
+    filter_agent=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --priority) filter_priority="$2"; shift 2 ;;
+        --agent)    filter_agent="$2";    shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    python3 - "$STORE" "$filter_status" "$filter_priority" "$filter_agent" <<'EOF'
 import json, sys
 with open(sys.argv[1]) as f: d = json.load(f)
-filter_ = sys.argv[2]
+filter_status, filter_priority, filter_agent = sys.argv[2], sys.argv[3], sys.argv[4]
 tasks = d["tasks"]
-if filter_ == "open":
-    tasks = [t for t in tasks if t["status"] == "open"]
+if filter_status in ("open","done"):
+    tasks = [t for t in tasks if t["status"] == filter_status]
+if filter_priority:
+    tasks = [t for t in tasks if t.get("priority","medium") == filter_priority]
+if filter_agent:
+    tasks = [t for t in tasks if t.get("agent","") == filter_agent]
 if not tasks:
     print("  (no tasks)"); sys.exit(0)
+GREEN, RED, YELLOW, GREY, NC, BOLD = "\033[32m", "\033[31m", "\033[33m", "\033[90m", "\033[0m", "\033[1m"
+pri_colors = {"high": RED, "medium": YELLOW, "low": GREY}
+label = filter_status if filter_status != "all" else "all"
+print(f"\n  {BOLD}Tasks ({label}){NC}\n")
 for t in tasks:
-    icon = "\033[32m✓\033[0m" if t["status"] == "done" else "\033[33m○\033[0m"
-    print(f"  {icon}  #{t['id']}  {t['desc']}")
+    icon = f"{GREEN}✓{NC}" if t["status"] == "done" else f"{YELLOW}○{NC}"
+    pri = t.get("priority","medium")
+    pc = pri_colors.get(pri, YELLOW)
+    agent_str = f"  →{t['agent']}" if t.get("agent") else ""
+    blocks_str = f"  blocks:{','.join(map(str,t['blocks']))}" if t.get("blocks") else ""
+    print(f"  {icon}  {pc}[{pri}]{NC}  #{t['id']}  {t['desc']}{agent_str}{blocks_str}")
+print("")
 EOF
     ;;
+
   done)
     [ -z "$2" ] && { echo "Usage: task done <id>"; exit 1; }
     python3 - "$STORE" "$2" <<'EOF'
@@ -58,6 +113,7 @@ with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
 print(f"  \033[32m✓\033[0m  Task #{tid} marked done")
 EOF
     ;;
+
   del|delete|rm)
     [ -z "$2" ] && { echo "Usage: task del <id>"; exit 1; }
     python3 - "$STORE" "$2" <<'EOF'
@@ -71,6 +127,41 @@ with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
 print(f"  \033[32m✓\033[0m  Task #{tid} deleted")
 EOF
     ;;
+
+  assign)
+    [ -z "$2" ] || [ -z "$3" ] && { echo "Usage: task assign <id> <agent>"; exit 1; }
+    python3 - "$STORE" "$2" "$3" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+tid, agent = int(sys.argv[2]), sys.argv[3]
+found = False
+for t in d["tasks"]:
+    if t["id"] == tid:
+        t["agent"] = agent; found = True; break
+if not found: print(f"  Task #{tid} not found"); sys.exit(1)
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Task #{tid} assigned to {agent}")
+EOF
+    ;;
+
+  priority)
+    [ -z "$2" ] || [ -z "$3" ] && { echo "Usage: task priority <id> <high|medium|low>"; exit 1; }
+    python3 - "$STORE" "$2" "$3" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+tid, pri = int(sys.argv[2]), sys.argv[3]
+if pri not in ("high","medium","low"):
+    print("  Priority must be: high, medium, or low"); sys.exit(1)
+found = False
+for t in d["tasks"]:
+    if t["id"] == tid:
+        t["priority"] = pri; found = True; break
+if not found: print(f"  Task #{tid} not found"); sys.exit(1)
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Task #{tid} priority → {pri}")
+EOF
+    ;;
+
   clear)
     python3 - "$STORE" <<'EOF'
 import json, sys
@@ -82,8 +173,9 @@ with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
 print(f"  \033[32m✓\033[0m  {removed} done task(s) cleared")
 EOF
     ;;
+
   *)
-    echo "Usage: task add|list|done|del|clear [args]"
+    echo "Usage: task add|list|done|del|assign|priority|clear [args]"
     exit 1
     ;;
 esac

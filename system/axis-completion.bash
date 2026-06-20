@@ -9,25 +9,33 @@ _axis_complete() {
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
   # Top-level commands
-  local top_cmds="boot check map update note task plan memory budget snapshot secret agent mcp cron cfg watch run log msg export help version status"
+  local top_cmds="boot check map update note task plan memory budget snapshot secret agent mcp cron cfg watch run log msg export help version status doctor ps size clean start stop restart diff alert ports sync history trace env ctx metric skill sched dash plug"
 
   # Subcommands per command
   local note_sub="list read clear"
-  local task_sub="add list done del clear"
+  local task_sub="add list done del assign priority clear"
   local plan_sub="set add done show clear"
   local memory_sub="set get list del"
-  local budget_sub="log show reset"
+  local budget_sub="log show threshold forecast reset"
   local snapshot_sub="list restore"
-  local secret_sub="list get set del"
+  local secret_sub="list get set rotate audit del"
   local agent_sub="list add show ping del"
   local mcp_sub="list add del show status"
   local cron_sub="list add del show"
   local cfg_sub="list get set del show edit"
   local watch_sub="list"
-  local log_sub="today week errors all"
+  local log_sub="today week errors all live summary search app"
   local run_sub="list"
   local msg_sub="list"
   local export_sub="--include-secrets"
+  local trace_sub="log last search stats show"
+  local env_sub="show set get del check list"
+  local ctx_sub="brief save load list del"
+  local metric_sub="list show trend top"
+  local skill_sub="list add show search del"
+  local sched_sub="add list log pause resume run del"
+  local dash_sub="start stop status url"
+  local plug_sub="list install uninstall"
 
   if [ "$COMP_CWORD" -eq 1 ]; then
     COMPREPLY=( $(compgen -W "$top_cmds" -- "$cur") )
@@ -50,7 +58,19 @@ _axis_complete() {
     log)      COMPREPLY=( $(compgen -W "$log_sub" -- "$cur") ) ;;
     msg)      COMPREPLY=( $(compgen -W "$msg_sub $(python3 -c "import json; d=json.load(open('$HOME/system/agents.json')); print(' '.join(d.get('agents',{}).keys()))" 2>/dev/null)" -- "$cur") ) ;;
     export)   COMPREPLY=( $(compgen -W "$export_sub" -- "$cur") ) ;;
+    trace)    COMPREPLY=( $(compgen -W "$trace_sub" -- "$cur") ) ;;
+    env)      COMPREPLY=( $(compgen -W "$env_sub" -- "$cur") ) ;;
+    ctx)      COMPREPLY=( $(compgen -W "$ctx_sub" -- "$cur") ) ;;
+    metric)   COMPREPLY=( $(compgen -W "$metric_sub" -- "$cur") ) ;;
+    skill)    COMPREPLY=( $(compgen -W "$skill_sub" -- "$cur") ) ;;
+    sched)    COMPREPLY=( $(compgen -W "$sched_sub" -- "$cur") ) ;;
+    dash)     COMPREPLY=( $(compgen -W "$dash_sub" -- "$cur") ) ;;
+    plug)     COMPREPLY=( $(compgen -W "$plug_sub" -- "$cur") ) ;;
   esac
 }
 
 complete -F _axis_complete axis
+# Also complete standalone commands
+complete -F _axis_complete trace
+complete -F _axis_complete ctx
+complete -F _axis_complete metric

@@ -1,5 +1,5 @@
 #!/bin/bash
-# axis — Agent Computer CLI  v3.4.0
+# axis — Agent Computer CLI  v4.0.0
 # The single command that IS your computer.
 
 BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
@@ -53,6 +53,26 @@ print(f'\${t:.4f} across {len(e)} entries') if e else print('none')
   [ -f "$H/system/memory.json" ] && \
     MEMORY_COUNT=$(python3 -c "import json; print(len(json.load(open('$H/system/memory.json'))))" 2>/dev/null)
 
+  local MISSION="" TRACE_STATS=""
+  [ -f "$H/system/env.json" ] && \
+    MISSION=$(python3 -c "import json; d=json.load(open('$H/system/env.json')); print(d.get('mission',''))" 2>/dev/null)
+  [ -f "$H/system/trace.jsonl" ] && \
+    TRACE_STATS=$(python3 - "$H/system/trace.jsonl" <<'EOF'
+import json, sys, os
+lines = open(sys.argv[1]).readlines() if os.path.exists(sys.argv[1]) else []
+entries = []
+for l in lines:
+    l = l.strip()
+    if l:
+        try: entries.append(json.loads(l))
+        except: pass
+if not entries: sys.exit(0)
+s = sum(1 for e in entries if e.get("outcome") == "success")
+f = len(entries) - s
+print(f"{len(entries)} outcomes ({s} success, {f} fail)")
+EOF
+)
+
   [ -f "$H/system/agents.json" ] && AGENT_STATUS=$(python3 - "$H/system/agents.json" <<'EOF'
 import json,sys,subprocess
 d=json.load(open(sys.argv[1]))
@@ -92,6 +112,7 @@ EOF
 
   # Work row
   echo -e "  ${BOLD}${BLUE}Work${NC}"
+  [ -n "$MISSION" ] && echo -e "    Mission    ${CYAN}${MISSION}${NC}"
   [ "$INBOX_COUNT" -gt 0 ] && echo -e "    Inbox      ${YELLOW}${INBOX_COUNT} message(s) — axis note list${NC}" \
                              || echo -e "    Inbox      ${DIM}empty${NC}"
   if [ "$OPEN_TASKS" -gt 0 ]; then
@@ -103,6 +124,7 @@ EOF
   [ -n "$PLAN_TITLE" ] && echo -e "    Plan       ${CYAN}${PLAN_TITLE}${NC}" || echo -e "    Plan       ${DIM}none${NC}"
   echo -e "    Budget     ${DIM}${BUDGET_LINE:-none} this month${NC}"
   echo -e "    Memory     ${MEMORY_COUNT} stored facts"
+  [ -n "$TRACE_STATS" ] && echo -e "    Trace      ${DIM}${TRACE_STATS}${NC}" || echo -e "    Trace      ${DIM}no outcomes yet — axis trace log \"...\"${NC}"
   echo ""
 
   # Agents row
@@ -867,8 +889,23 @@ cmd_help() {
   echo -e "    ${CYAN}axis cron list/add/del${NC}   Cron job management"
   echo ""
   echo -e "  ${BOLD}${BLUE}Security${NC}"
-  echo -e "    ${CYAN}axis secret list/get${NC}     Safe key access"
-  echo -e "    ${CYAN}axis export${NC}              Package for migration"
+  echo -e "    ${CYAN}axis secret list/get/set/rotate/audit${NC}  Key access + expiry tracking"
+  echo -e "    ${CYAN}axis export${NC}                            Package for migration"
+  echo ""
+  echo -e "  ${BOLD}${BLUE}Intelligence — v4.0${NC}"
+  echo -e "    ${CYAN}axis ctx brief${NC}               LLM-ready session brief — paste into any new session"
+  echo -e "    ${CYAN}axis ctx save/load/list${NC}      Named context snapshots"
+  echo -e "    ${CYAN}axis trace log \"...\" --outcome success|fail${NC}"
+  echo -e "                                 Record what happened — survives context resets"
+  echo -e "    ${CYAN}axis trace last [N]${NC}          Recent outcomes"
+  echo -e "    ${CYAN}axis trace search \"query\"${NC}    Search outcomes (--outcome fail to filter)"
+  echo -e "    ${CYAN}axis trace stats${NC}             Success rate and top tags"
+  echo -e "    ${CYAN}axis env show${NC}                Machine mission + constraints"
+  echo -e "    ${CYAN}axis env set <key> <value>${NC}   Set mission, risk, constraints"
+  echo -e "    ${CYAN}axis env check${NC}               Validate critical fields are set"
+  echo -e "    ${CYAN}axis metric list${NC}             Apps with metrics files"
+  echo -e "    ${CYAN}axis metric show [app]${NC}       Latest metric snapshot"
+  echo -e "    ${CYAN}axis metric trend <field> --app <app>${NC}  Time-series of a metric"
   echo ""
 }
 
@@ -913,5 +950,14 @@ case "${1:-}" in
   history)                 shift; cmd_history "$@" ;;
   help)                    shift; cmd_help "$@" ;;
   version|--version|-v)    cmd_version ;;
+  # v4.0 Intelligence Layer — run bin scripts by full path (not dependent on PATH)
+  trace)                   shift; exec bash "$H/bin/trace" "$@" ;;
+  env)                     shift; exec bash "$H/bin/envdata" "$@" ;;
+  ctx)                     shift; exec bash "$H/bin/ctx" "$@" ;;
+  metric)                  shift; exec bash "$H/bin/metric" "$@" ;;
+  skill)                   shift; exec bash "$H/bin/skill" "$@" 2>/dev/null || { echo "  skill — coming in v4.0 Phase 3"; exit 1; } ;;
+  sched)                   shift; exec bash "$H/bin/sched" "$@" 2>/dev/null || { echo "  sched — coming in v4.0 Phase 3"; exit 1; } ;;
+  dash)                    shift; exec bash "$H/bin/dash" "$@" 2>/dev/null || { echo "  dash — coming in v4.0 Phase 2"; exit 1; } ;;
+  plug)                    shift; exec bash "$H/bin/plug" "$@" 2>/dev/null || { echo "  plug — coming in v4.0 Phase 3"; exit 1; } ;;
   *)                       cmd_delegate "$@" ;;
 esac

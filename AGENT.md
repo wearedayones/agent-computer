@@ -103,6 +103,43 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 
 ---
 
+## Intelligence Layer (v4.0) — Anti-Amnesia Commands
+
+These three commands are the core of v4.0. Run them at the start of every session.
+
+| Command | Action |
+|---------|--------|
+| `ctx brief` | **Paste-ready session brief** — machine, mission, tasks, recent outcomes, constraints. Use this to orient any LLM in 3 seconds. |
+| `ctx save <name>` | Snapshot current state to a named file |
+| `ctx load <name>` | Print a saved context brief |
+| `ctx list` | List all saved contexts |
+| `trace log "action" --outcome success\|fail` | **Record what happened** — survives context resets forever |
+| `trace log "..." --detail "why" --tags tag1,tag2` | Log with extra context and searchable tags |
+| `trace last [N]` | Show the N most recent outcomes |
+| `trace search "query"` | Full-text search across all outcomes |
+| `trace search --outcome fail` | Show only failures (what NOT to repeat) |
+| `trace stats` | Success rate, top tags, recent failure count |
+| `env show` | **Machine mission and constraints** — what this computer is for, who owns it, risk level |
+| `env set <key> <value>` | Set a context field (mission, owner, risk, constraint.*) |
+| `env check` | Validate all critical fields are populated |
+| `task add "..." --priority high\|medium\|low` | Add task with priority (v2) |
+| `task add "..." --agent <name>` | Assign to a specific agent (v2) |
+| `task list --priority high` | Filter tasks by priority (v2) |
+| `task assign <id> <agent>` | Reassign a task (v2) |
+| `budget log <amount> "desc" --category <cat>` | Track spend by category (v2) |
+| `budget threshold set <cat\|total> <amount>` | Set a spending limit with warnings (v2) |
+| `budget forecast` | Extrapolate month-end spend based on daily rate (v2) |
+| `budget show --by-category` | Grouped spend view (v2) |
+| `secret set <name> --expires <date> --category <cat>` | Secret with expiry tracking (v2) |
+| `secret rotate <name>` | Replace a secret, archive old value with timestamp (v2) |
+| `secret audit` | Show secrets expiring within 30 days (v2) |
+| `metric list` | Show all apps that have metrics files |
+| `metric show [<app>]` | Latest metric snapshot for an app |
+| `metric trend <field> --app <app>` | Time-series of a metric field |
+| `metric top --by <field>` | Rank apps by a metric |
+
+---
+
 ## Zone Map
 
 | What | Where | Example |
@@ -118,6 +155,8 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 | Temp / downloaded content | `~/downloads/` | `~/downloads/import.zip` |
 | API keys and credentials | `~/keys/` | `~/keys/openai.txt` |
 | Python venvs (shared) | `~/apps/envs/` | `~/apps/envs/my-bot-venv/` |
+| Reusable agent skill files | `~/skills/` | `~/skills/bybit-research.md` |
+| Third-party axis plugins | `~/plugins/` | `~/plugins/my-plugin/` |
 | **Root (`~/`)** | **NEVER** | Nothing goes here |
 
 ---

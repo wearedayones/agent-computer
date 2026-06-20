@@ -1,54 +1,222 @@
 #!/bin/bash
-# budget — cost and spend tracking ledger
-# Usage: budget log <amount> "description"
-#        budget show [month YYYY-MM]
+# budget — cost and spend tracking (v2: categories, thresholds, forecast)
+# Usage: budget log <amount> "description" [--category name]
+#        budget show [month YYYY-MM] [--by-category]
+#        budget threshold set <category|total> <amount>
+#        budget threshold list
+#        budget forecast
 #        budget reset
 
 STORE="$HOME/system/budget.json"
-[ -f "$STORE" ] || echo '{"entries":[]}' > "$STORE"
+[ -f "$STORE" ] || echo '{"entries":[],"thresholds":{}}' > "$STORE"
+
+# Migrate old format (entries only, no thresholds key)
+python3 - "$STORE" <<'EOF' 2>/dev/null || true
+import json
+with open(__import__('sys').argv[1]) as f: d = json.load(f)
+changed = False
+if "thresholds" not in d:
+    d["thresholds"] = {}; changed = True
+if changed:
+    with open(__import__('sys').argv[1], "w") as f: json.dump(d, f, indent=2)
+EOF
 
 cmd="${1:-show}"
 
 case "$cmd" in
   log)
-    [ -z "$2" ] && { echo "Usage: budget log <amount> <description>"; exit 1; }
-    amount="$2"; shift 2; desc="${*:-unspecified}"
-    python3 - "$STORE" "$amount" "$desc" <<'EOF'
+    [ -z "$2" ] && { echo "Usage: budget log <amount> <description> [--category name]"; exit 1; }
+    amount="$2"; shift 2
+    desc=""
+    category=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --category) category="$2"; shift 2 ;;
+        *) desc="${desc:+$desc }$1"; shift ;;
+      esac
+    done
+    [ -z "$desc" ] && desc="unspecified"
+    python3 - "$STORE" "$amount" "$desc" "$category" <<'EOF'
 import json, sys
 from datetime import datetime, timezone
-store, amount, desc = sys.argv[1], sys.argv[2], sys.argv[3]
+store, amount, desc, category = sys.argv[1:5]
 try: amt = float(amount)
 except ValueError: print(f"  Invalid amount: {amount}"); sys.exit(1)
 with open(store) as f: d = json.load(f)
-d["entries"].append({
+entry = {
     "amount": amt,
     "desc": desc,
     "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "month": datetime.now(timezone.utc).strftime("%Y-%m"),
-})
+}
+if category: entry["category"] = category
+d["entries"].append(entry)
+
+# Check threshold
+thresholds = d.get("thresholds", {})
+month = datetime.now(timezone.utc).strftime("%Y-%m")
+entries_this_month = [e for e in d["entries"] if e.get("month","") == month]
+total_this_month = sum(e["amount"] for e in entries_this_month)
+
 with open(store, "w") as f: json.dump(d, f, indent=2)
-print(f"  \033[32m✓\033[0m  Logged ${amt:.4f} — {desc}")
+cat_str = f"  [{category}]" if category else ""
+print(f"  \033[32m✓\033[0m  Logged ${amt:.4f}{cat_str} — {desc}")
+
+# Warn on threshold breach
+YELLOW, NC = "\033[1;33m", "\033[0m"
+if "total" in thresholds and total_this_month > float(thresholds["total"]):
+    print(f"  {YELLOW}⚠  Total threshold ${thresholds['total']} exceeded (${total_this_month:.2f} this month){NC}")
+if category and category in thresholds:
+    cat_entries = [e for e in entries_this_month if e.get("category","") == category]
+    cat_total = sum(e["amount"] for e in cat_entries)
+    if cat_total > float(thresholds[category]):
+        print(f"  {YELLOW}⚠  {category} threshold ${thresholds[category]} exceeded (${cat_total:.2f} this month){NC}")
 EOF
     ;;
+
   show)
-    month="${2:-}"
-    python3 - "$STORE" "$month" <<'EOF'
+    shift
+    month=""
+    by_category=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --by-category) by_category=1; shift ;;
+        month) month="$2"; shift 2 ;;
+        *) month="$1"; shift ;;
+      esac
+    done
+    python3 - "$STORE" "$month" "$by_category" <<'EOF'
 import json, sys
 from datetime import datetime, timezone
 with open(sys.argv[1]) as f: d = json.load(f)
 filter_month = sys.argv[2] if sys.argv[2] else datetime.now(timezone.utc).strftime("%Y-%m")
+by_cat = sys.argv[3] == "1"
 entries = [e for e in d["entries"] if e.get("month","") == filter_month]
+BOLD, YELLOW, GREEN, RED, NC = "\033[1m", "\033[1;33m", "\033[0;32m", "\033[0;31m", "\033[0m"
+thresholds = d.get("thresholds", {})
+
 if not entries:
     print(f"  No spend logged for {filter_month}"); sys.exit(0)
+
 total = sum(e["amount"] for e in entries)
-print(f"\n  \033[1mSpend — {filter_month}\033[0m\n")
-for e in entries:
-    ts = e["ts"][5:16].replace("T"," ")
-    print(f"  {ts}  \033[33m${e['amount']:<8.4f}\033[0m  {e['desc']}")
-print(f"\n  {'─'*40}")
-print(f"  \033[1mTotal: ${total:.4f}\033[0m\n")
+total_thresh = thresholds.get("total")
+
+print(f"\n  {BOLD}Spend — {filter_month}{NC}")
+thresh_str = f"  (threshold: ${float(total_thresh):.2f})" if total_thresh else ""
+total_color = RED if total_thresh and total > float(total_thresh) else GREEN
+print(f"  Total: {total_color}${total:.4f}{NC}{thresh_str}\n")
+
+if by_cat:
+    cats = {}
+    for e in entries:
+        c = e.get("category", "uncategorized")
+        cats.setdefault(c, []).append(e)
+    print(f"  {'─'*50}")
+    for c, ces in sorted(cats.items()):
+        ctotal = sum(e["amount"] for e in ces)
+        ct = thresholds.get(c)
+        ct_str = f"  / ${float(ct):.2f}" if ct else ""
+        c_color = RED if ct and ctotal > float(ct) else NC
+        print(f"  {YELLOW}{c:<20}{NC}  {c_color}${ctotal:.4f}{NC}{ct_str}  ({len(ces)} entries)")
+    print("")
+else:
+    print(f"  {'─'*50}")
+    for e in entries:
+        ts = e["ts"][5:16].replace("T"," ")
+        cat = f"[{e['category']}]" if e.get("category") else ""
+        print(f"  {ts}  {YELLOW}${e['amount']:<8.4f}{NC}  {cat}  {e['desc']}")
+    print(f"\n  {'─'*50}")
+    print(f"  {BOLD}Total: ${total:.4f}{NC}\n")
 EOF
     ;;
+
+  threshold)
+    sub="${2:-list}"
+    case "$sub" in
+      set)
+        [ -z "$3" ] || [ -z "$4" ] && { echo "Usage: budget threshold set <category|total> <amount>"; exit 1; }
+        python3 - "$STORE" "$3" "$4" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+key, amount = sys.argv[2], sys.argv[3]
+try: amt = float(amount)
+except: print("  Invalid amount"); sys.exit(1)
+d.setdefault("thresholds",{})[key] = amt
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Threshold set: {key} = ${amt:.2f}")
+EOF
+        ;;
+      list|"")
+        python3 - "$STORE" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+t = d.get("thresholds",{})
+if not t:
+    print("  (no thresholds set — add with: budget threshold set <category|total> <amount>)")
+    sys.exit(0)
+YELLOW, NC = "\033[1;33m", "\033[0m"
+print("\n  Thresholds:\n")
+for k, v in t.items():
+    print(f"  {YELLOW}{k:<20}{NC}  ${float(v):.2f}")
+print("")
+EOF
+        ;;
+      del|rm)
+        [ -z "$3" ] && { echo "Usage: budget threshold del <category>"; exit 1; }
+        python3 - "$STORE" "$3" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+key = sys.argv[2]
+if key not in d.get("thresholds",{}):
+    print(f"  (not found: {key})"); sys.exit(1)
+del d["thresholds"][key]
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Threshold for {key} removed")
+EOF
+        ;;
+      *) echo "Usage: budget threshold set|list|del [args]"; exit 1 ;;
+    esac
+    ;;
+
+  forecast)
+    python3 - "$STORE" <<'EOF'
+import json, sys
+from datetime import datetime, timezone
+from math import ceil
+with open(sys.argv[1]) as f: d = json.load(f)
+BOLD, YELLOW, GREEN, RED, NC = "\033[1m", "\033[1;33m", "\033[0;32m", "\033[0;31m", "\033[0m"
+now = datetime.now(timezone.utc)
+month = now.strftime("%Y-%m")
+entries = [e for e in d["entries"] if e.get("month","") == month]
+if not entries:
+    print(f"  No spend logged for {month} — nothing to forecast"); sys.exit(0)
+total_so_far = sum(e["amount"] for e in entries)
+# Find earliest entry this month
+first_ts = min(e["ts"] for e in entries)
+first_dt = datetime.fromisoformat(first_ts.replace("Z","+00:00"))
+days_elapsed = max((now - first_dt).total_seconds() / 86400, 0.1)
+daily_rate = total_so_far / days_elapsed
+# Days in month
+import calendar
+days_in_month = calendar.monthrange(now.year, now.month)[1]
+days_remaining = days_in_month - now.day
+forecast_total = total_so_far + (daily_rate * days_remaining)
+threshold = d.get("thresholds", {}).get("total")
+
+print(f"\n  {BOLD}Spend Forecast — {month}{NC}\n")
+print(f"  Spent so far   : ${total_so_far:.4f}")
+print(f"  Daily rate     : ${daily_rate:.4f}/day ({days_elapsed:.1f} days of data)")
+print(f"  Days remaining : {days_remaining}")
+f_color = RED if threshold and forecast_total > float(threshold) else GREEN
+print(f"  Month forecast : {f_color}${forecast_total:.4f}{NC}")
+if threshold:
+    pct = forecast_total / float(threshold) * 100
+    t_color = RED if pct > 100 else YELLOW if pct > 80 else GREEN
+    print(f"  vs threshold   : {t_color}${float(threshold):.2f} ({pct:.0f}%){NC}")
+print("")
+EOF
+    ;;
+
   reset)
     python3 - "$STORE" <<'EOF'
 import json, sys
@@ -62,8 +230,9 @@ with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
 print(f"  \033[32m✓\033[0m  Cleared {removed} entries for {month}")
 EOF
     ;;
+
   *)
-    echo "Usage: budget log|show|reset [args]"
+    echo "Usage: budget log|show|threshold|forecast|reset [args]"
     exit 1
     ;;
 esac
