@@ -6,9 +6,9 @@
 
 ## Your Workspace
 
-**Your workspace is `$HOME` (`/home/ubuntu/` or equivalent). That is the computer.**
+**Your workspace is `$HOME`. That is the computer.**
 
-`~/projects/agent-computer/` is the **source repository** where this infrastructure was built. It is NOT your workspace — it is the dev repo the owner uses to push updates to GitHub. Never treat it as your working environment. Never create files there. Never use it as a reference for "how the computer works" — the live files in `~/bin/`, `~/system/`, `~/scripts/` are always authoritative.
+The authoritative files are the ones already installed — `~/bin/`, `~/system/`, `~/scripts/`. Everything you do lives under `$HOME` in the correct zone (see Zone Map below).
 
 ---
 
