@@ -957,10 +957,13 @@ case "${1:-}" in
   metric)                  shift; exec bash "$H/system/metric.sh" "$@" ;;
   # v4.1 Visibility Layer
   dash)                    shift; exec bash "$H/bin/dash" "$@" ;;
-  # v4.0 Platform Layer
+  # v4.2 Platform Layer
   skill)                   shift; exec bash "$H/bin/skill" "$@" ;;
   sched)                   shift; exec bash "$H/bin/sched" "$@" ;;
   plug)                    shift; exec bash "$H/bin/plug" "$@" ;;
+  # v4.3 Scale Layer
+  peers)                   shift; exec bash "$H/bin/peers" "$@" ;;
+  fleet)                   shift; exec bash "$H/bin/fleet" "$@" ;;
   *)
     # Plugin auto-discovery: axis <name> → ~/plugins/<name>/cmd
     if [ -x "$H/plugins/$1/cmd" ]; then

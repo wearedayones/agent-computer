@@ -140,6 +140,48 @@ These three commands are the core of v4.0. Run them at the start of every sessio
 
 ---
 
+## Visibility Layer (v4.1) — Dashboard and Log Tools
+
+| Command | Action |
+|---------|--------|
+| `axis dash start` | **Start web dashboard** on port 2222 (tmux-persistent). 8 panels: system, tasks, budget, trace, metrics, inbox, alerts, cron. |
+| `axis dash stop` | Stop the dashboard |
+| `axis dash status` | Is it running and on which port? |
+| `axis log summary` | Per-app error count and run count today across all ~/apps/ logs |
+| `axis log live` | Multiplex-tail up to 8 app logs in real-time with colored prefixes |
+| `axis log search "pattern" --days N` | Grep across all app logs with highlighted matches |
+| `axis log app <name> [--errors]` | Tail one app's logs, optionally filter to errors only |
+
+**Dashboard remote access:** `ssh -L 2222:localhost:2222 user@host` then open `http://localhost:2222`
+
+**Alert rules** live in `~/system/alert-rules.json` and are evaluated every 5 min by cron. A triggered rule writes an inbox note (with cooldown to prevent spam). Default rules: disk > 90% and disk free < 2 GB.
+
+---
+
+## Platform Layer (v4.2) — Skills, Scheduled Jobs, Plugins
+
+| Command | Action |
+|---------|--------|
+| `axis skill list` | Show all skills in ~/skills/ with description and version |
+| `axis skill add <name>` | Create a new skill file from template |
+| `axis skill show <name>` | Print a skill file |
+| `axis skill search <query>` | Search skill descriptions and content |
+| `axis sched add "every 5min" "cmd" --name <n>` | Add a named cron job with run history |
+| `axis sched list` | Show all scheduled jobs with last run and OK/FAIL status |
+| `axis sched log <name>` | Show run history with timing and exit codes |
+| `axis sched run <name>` | Run a scheduled job immediately (for testing) |
+| `axis sched pause/resume <name>` | Pause or resume without losing the job definition |
+| `axis plug list` | Show installed plugins |
+| `axis plug install <path>` | Install a plugin directory to ~/plugins/ |
+| `axis plug new <name>` | Scaffold a new plugin with manifest + cmd |
+| `axis <plugin-name> [args]` | Auto-dispatch to any installed plugin |
+
+**Skill format:** `~/skills/<name>.md` — Markdown with `> Description` frontmatter and a Steps section. Include `axis trace search "<topic>"` in Constraints to avoid repeating past failures.
+
+**Sched schedules:** `every N min`, `every N hours`, `every day at HH:MM`, `every weekday at HH:MM`, `every week on Mon at HH:MM` — or raw cron syntax.
+
+---
+
 ## Zone Map
 
 | What | Where | Example |

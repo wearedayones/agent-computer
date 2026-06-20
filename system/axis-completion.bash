@@ -9,7 +9,7 @@ _axis_complete() {
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
   # Top-level commands
-  local top_cmds="boot check map update note task plan memory budget snapshot secret agent mcp cron cfg watch run log msg export help version status doctor ps size clean start stop restart diff alert ports sync history trace env ctx metric skill sched dash plug"
+  local top_cmds="boot check map update note task plan memory budget snapshot secret agent mcp cron cfg watch run log msg export help version status doctor ps size clean start stop restart diff alert ports sync peers fleet history trace env ctx metric skill sched dash plug"
 
   # Subcommands per command
   local note_sub="list read clear"
@@ -35,7 +35,10 @@ _axis_complete() {
   local skill_sub="list add show search del"
   local sched_sub="add list log pause resume run del"
   local dash_sub="start stop status url"
-  local plug_sub="list install uninstall"
+  local plug_sub="list install uninstall new info"
+  local sync_sub="peer push pull diff"
+  local sync_peer_sub="add list ping del"
+  local fleet_sub="list status run alert push"
 
   if [ "$COMP_CWORD" -eq 1 ]; then
     COMPREPLY=( $(compgen -W "$top_cmds" -- "$cur") )
@@ -66,6 +69,9 @@ _axis_complete() {
     sched)    COMPREPLY=( $(compgen -W "$sched_sub" -- "$cur") ) ;;
     dash)     COMPREPLY=( $(compgen -W "$dash_sub" -- "$cur") ) ;;
     plug)     COMPREPLY=( $(compgen -W "$plug_sub" -- "$cur") ) ;;
+    peers)    COMPREPLY=( $(compgen -W "$sync_sub" -- "$cur") ) ;;
+    fleet)    COMPREPLY=( $(compgen -W "$fleet_sub" -- "$cur") ) ;;
+    peer)     COMPREPLY=( $(compgen -W "$sync_peer_sub" -- "$cur") ) ;;
   esac
 }
 

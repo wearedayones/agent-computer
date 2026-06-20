@@ -1,0 +1,163 @@
+#!/bin/bash
+# sync — SSH peer sync between Agent Computer machines
+# Usage: axis sync peer add <alias> <user@host>
+#        axis sync peer list
+#        axis sync peer ping <alias>
+#        axis sync peer del <alias>
+#        axis sync push <alias> <path>
+#        axis sync pull <alias> <path>
+#        axis sync diff <alias>
+
+PEERS_FILE="$HOME/system/sync-peers.json"
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'
+BOLD='\033[1m'; DIM='\033[2m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+[ -f "$PEERS_FILE" ] || echo '{"peers":{}}' > "$PEERS_FILE"
+
+resolve_peer() {
+  local alias="$1"
+  python3 -c "
+import json, sys
+from pathlib import Path
+d = json.loads(Path('$PEERS_FILE').read_text())
+p = d.get('peers', {}).get('$alias')
+if p: print(p['host'])
+" 2>/dev/null
+}
+
+cmd="${1:-peer}"
+
+case "$cmd" in
+  peer)
+    sub="${2:-list}"
+    case "$sub" in
+      add)
+        alias="${3:-}"; host="${4:-}"
+        [ -z "$alias" ] || [ -z "$host" ] && { echo "Usage: axis sync peer add <alias> <user@host>"; exit 1; }
+        python3 - "$PEERS_FILE" "$alias" "$host" <<'EOF'
+import json, sys
+from pathlib import Path
+from datetime import datetime, timezone
+store, alias, host = sys.argv[1:4]
+d = json.loads(Path(store).read_text())
+d["peers"][alias] = {"host": host, "added": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+Path(store).write_text(json.dumps(d, indent=2))
+EOF
+        echo -e "  ${GREEN}✓${NC}  Peer '$alias' added → $host"
+        echo -e "  ${DIM}Test with: axis sync peer ping $alias${NC}"
+        ;;
+
+      list)
+        python3 - "$PEERS_FILE" <<'EOF'
+import json, sys
+from pathlib import Path
+BOLD, CYAN, DIM, NC = "\033[1m", "\033[0;36m", "\033[2m", "\033[0m"
+d = json.loads(Path(sys.argv[1]).read_text())
+peers = d.get("peers", {})
+if not peers:
+    print("\n  (no peers — add with: axis sync peer add <alias> <user@host>)\n")
+    sys.exit(0)
+print(f"\n  {BOLD}Sync Peers{NC}\n")
+print(f"  {'ALIAS':<16}  HOST")
+print(f"  {'─'*45}")
+for alias, p in peers.items():
+    print(f"  {CYAN}{alias:<16}{NC}  {p['host']}  {DIM}(added {p.get('added','?')[:10]}){NC}")
+print("")
+EOF
+        ;;
+
+      ping)
+        alias="${3:-}"
+        [ -z "$alias" ] && { echo "Usage: axis sync peer ping <alias>"; exit 1; }
+        host=$(resolve_peer "$alias")
+        [ -z "$host" ] && { echo "  (peer '$alias' not found)"; exit 1; }
+        echo -e "  ${DIM}Pinging $alias ($host)...${NC}"
+        if ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "echo ok" &>/dev/null; then
+          version=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "cat ~/.version 2>/dev/null || cat ~/system/.version 2>/dev/null || echo '?'" 2>/dev/null)
+          echo -e "  ${GREEN}✓${NC}  $alias reachable — v$version"
+        else
+          echo -e "  ${RED}✗${NC}  $alias unreachable ($host)"
+          exit 1
+        fi
+        ;;
+
+      del|delete|rm)
+        alias="${3:-}"
+        [ -z "$alias" ] && { echo "Usage: axis sync peer del <alias>"; exit 1; }
+        python3 - "$PEERS_FILE" "$alias" <<'EOF'
+import json, sys
+from pathlib import Path
+store, alias = sys.argv[1:3]
+d = json.loads(Path(store).read_text())
+if alias not in d.get("peers", {}):
+    print(f"  (peer '{alias}' not found)"); sys.exit(1)
+del d["peers"][alias]
+Path(store).write_text(json.dumps(d, indent=2))
+EOF
+        echo -e "  ${GREEN}✓${NC}  Peer '$alias' removed"
+        ;;
+
+      *)
+        echo "Usage: axis sync peer add|list|ping|del <args>"
+        exit 1
+        ;;
+    esac
+    ;;
+
+  push)
+    alias="${2:-}"; path="${3:-}"
+    [ -z "$alias" ] || [ -z "$path" ] && { echo "Usage: axis sync push <alias> <path>"; exit 1; }
+    host=$(resolve_peer "$alias")
+    [ -z "$host" ] && { echo "  (peer '$alias' not found)"; exit 1; }
+    # Expand ~ to full path
+    src="${path/#\~/$HOME}"
+    # Destination: same relative path on remote $HOME
+    rel="${src#$HOME/}"
+    echo -e "  ${DIM}Pushing ~/$rel → $alias:~/$rel${NC}"
+    if rsync -az --progress "$src" "$host:~/$rel"; then
+      echo -e "  ${GREEN}✓${NC}  Pushed ~/$rel to $alias"
+    else
+      echo -e "  ${RED}✗${NC}  Push failed"; exit 1
+    fi
+    ;;
+
+  pull)
+    alias="${2:-}"; path="${3:-}"
+    [ -z "$alias" ] || [ -z "$path" ] && { echo "Usage: axis sync pull <alias> <path>"; exit 1; }
+    host=$(resolve_peer "$alias")
+    [ -z "$host" ] && { echo "  (peer '$alias' not found)"; exit 1; }
+    src="${path/#\~/$HOME}"
+    rel="${src#$HOME/}"
+    echo -e "  ${DIM}Pulling $alias:~/$rel → ~/$rel${NC}"
+    mkdir -p "$(dirname "$src")"
+    if rsync -az --progress "$host:~/$rel" "$src"; then
+      echo -e "  ${GREEN}✓${NC}  Pulled $alias:~/$rel"
+    else
+      echo -e "  ${RED}✗${NC}  Pull failed"; exit 1
+    fi
+    ;;
+
+  diff)
+    alias="${2:-}"
+    [ -z "$alias" ] && { echo "Usage: axis sync diff <alias>"; exit 1; }
+    host=$(resolve_peer "$alias")
+    [ -z "$host" ] && { echo "  (peer '$alias' not found)"; exit 1; }
+    echo -e "\n  ${BOLD}System diff: local vs $alias${NC}\n"
+    for f in system/.version system/env.json system/tasks.json system/budget.json; do
+      local_val=$(cat "$HOME/$f" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d)[:60])" 2>/dev/null || cat "$HOME/$f" 2>/dev/null | tr -d '\n' | cut -c1-60)
+      remote_val=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" "cat ~/$f 2>/dev/null" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d)[:60])" 2>/dev/null || echo "?")
+      match="✓"; col="$GREEN"
+      [ "$local_val" != "$remote_val" ] && { match="≠"; col="$YELLOW"; }
+      echo -e "  ${col}${match}${NC}  $f"
+    done
+    echo ""
+    ;;
+
+  *)
+    echo "Usage: axis sync peer <add|list|ping|del>"
+    echo "       axis sync push <alias> <path>"
+    echo "       axis sync pull <alias> <path>"
+    echo "       axis sync diff <alias>"
+    exit 1
+    ;;
+esac

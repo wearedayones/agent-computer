@@ -179,16 +179,24 @@ apply "system/trace.sh"           "system/trace.sh"
 apply "system/env.sh"             "system/env.sh"
 apply "system/ctx.sh"             "system/ctx.sh"
 apply "system/metric.sh"          "system/metric.sh"
+apply "system/sched-run.sh"       "system/sched-run.sh"
 apply "scripts/auto-update.sh"    "scripts/auto-update.sh"
 apply "scripts/session-brief.sh"  "scripts/session-brief.sh"
 apply "scripts/vps-map.sh"        "scripts/vps-map.sh"
 apply "scripts/vps-export.sh"     "scripts/vps-export.sh"
 apply "scripts/vps-sync.sh"       "scripts/vps-sync.sh"
+apply "scripts/dash-server.py"    "scripts/dash-server.py"
+apply "scripts/alert-eval.sh"     "scripts/alert-eval.sh"
 for f in "$SCRIPT_DIR/bin/"*; do
   [ -f "$f" ] && apply "bin/$(basename "$f")" "bin/$(basename "$f")"
 done
 
-chmod +x "$HOME_DIR/bin/"* "$HOME_DIR/system/"*.sh "$HOME_DIR/scripts/"*.sh 2>/dev/null
+# Initialize state files if missing
+[ -f "$HOME_DIR/system/sched.json" ]     || echo '{"jobs":[]}' > "$HOME_DIR/system/sched.json"
+[ -f "$HOME_DIR/system/sched-log.jsonl" ] || touch "$HOME_DIR/system/sched-log.jsonl"
+[ -f "$HOME_DIR/system/alert-rules.json" ] || apply "system/alert-rules.json" "system/alert-rules.json"
+
+chmod +x "$HOME_DIR/bin/"* "$HOME_DIR/system/"*.sh "$HOME_DIR/scripts/"*.sh "$HOME_DIR/scripts/"*.py 2>/dev/null
 
 # ── Phase 4: PATH ─────────────────────────────────────────────────────────────
 phase "Configuring PATH..."
@@ -282,6 +290,7 @@ $job"
 add_cron "*/15 * * * * bash $HOME_DIR/system/relocator.sh >> $HOME_DIR/system/relocator.log 2>&1"  "relocator   (every 15 min — keeps zones tidy)"
 add_cron "0 * * * * bash $HOME_DIR/scripts/vps-map.sh >> /dev/null 2>&1"                           "vps-map     (every hour  — refreshes README)"
 add_cron "*/15 * * * * bash $HOME_DIR/scripts/auto-update.sh >> $HOME_DIR/system/update.log 2>&1"  "auto-update (every 15 min — pulls latest from GitHub)"
+add_cron "*/5 * * * * bash $HOME_DIR/scripts/alert-eval.sh >> $HOME_DIR/system/alert-eval.log 2>&1" "alert-eval  (every 5 min  — fires inbox alerts on rule breach)"
 
 echo "$CRONTAB" | crontab -
 
@@ -308,7 +317,10 @@ divider
 echo -e "\n  ${BOLD}${GREEN}✓  Agent Computer v$VERSION installed successfully!${NC}\n"
 echo -e "  ${BOLD}Next step:${NC}"
 echo -e "    source ~/.bashrc && boot\n"
-echo -e "  ${DIM}Commands available: boot  check  map  note  update  run  export${NC}"
+echo -e "  ${DIM}Core:         boot  check  map  note  update  run  export${NC}"
+echo -e "  ${DIM}Intelligence: axis trace  axis env  axis ctx  axis metric${NC}"
+echo -e "  ${DIM}Visibility:   axis dash start  axis log summary  axis log live${NC}"
+echo -e "  ${DIM}Platform:     axis skill  axis sched  axis plug${NC}"
 echo -e "  ${DIM}Auto-updates from GitHub every 15 minutes.${NC}\n"
 divider
 echo ""
