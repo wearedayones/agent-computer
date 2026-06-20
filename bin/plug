@@ -111,10 +111,13 @@ EOF
     ;;
 
   new)
-    # Scaffold a new plugin in current directory
     name="${2:-}"
     [ -z "$name" ] && { echo "Usage: axis plug new <name>"; exit 1; }
-    dst="$PWD/$name"
+    dst="$PLUGINS_DIR/$name"
+    if [ -d "$dst" ]; then
+      echo -e "  ${YELLOW}⚠${NC}  Plugin '$name' already exists at ~/plugins/$name/"
+      exit 1
+    fi
     mkdir -p "$dst"
     cat > "$dst/manifest.json" <<MANIFEST
 {
@@ -130,8 +133,8 @@ MANIFEST
 echo "  Hello from $name plugin! Args: \$*"
 CMDEOF
     chmod +x "$dst/cmd"
-    echo -e "  ${GREEN}✓${NC}  Plugin scaffold created at ./$name/"
-    echo -e "  ${DIM}Edit $dst/cmd, then: axis plug install ./$name${NC}"
+    echo -e "  ${GREEN}✓${NC}  Plugin '${name}' created at ~/plugins/$name/"
+    echo -e "  ${DIM}Edit ~/plugins/$name/cmd, then invoke with: axis $name${NC}"
     ;;
 
   *)

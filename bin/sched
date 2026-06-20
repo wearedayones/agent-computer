@@ -18,6 +18,29 @@ BOLD='\033[1m'; DIM='\033[2m'; CYAN='\033[0;36m'; NC='\033[0m'
 [ -f "$STORE" ] || echo '{"jobs":[]}' > "$STORE"
 touch "$RUNLOG"
 
+HAS_CRON=1
+command -v crontab &>/dev/null || HAS_CRON=0
+
+cron_add() {
+  local line="$1"
+  [ "$HAS_CRON" -eq 0 ] && { echo -e "  ${YELLOW}⚠${NC}  crontab not available — job saved but not scheduled (install cron: sudo apt install cron)"; return; }
+  CRONTAB=$(crontab -l 2>/dev/null || echo "")
+  (echo "$CRONTAB"; echo "$line") | crontab -
+}
+
+cron_del() {
+  local pattern="$1"
+  [ "$HAS_CRON" -eq 0 ] && return
+  CRONTAB=$(crontab -l 2>/dev/null || echo "")
+  echo "$CRONTAB" | grep -vF "$pattern" | crontab -
+}
+
+cron_has() {
+  local pattern="$1"
+  [ "$HAS_CRON" -eq 0 ] && return 1
+  crontab -l 2>/dev/null | grep -qF "$pattern"
+}
+
 # ── Natural language schedule → cron expression ───────────────────────────────
 parse_schedule() {
   local s="$1"
@@ -104,11 +127,10 @@ Path(store).write_text(json.dumps(d, indent=2))
 EOF
 
     # Add to crontab
-    CRONTAB=$(crontab -l 2>/dev/null || echo "")
-    if echo "$CRONTAB" | grep -qF "sched-run.sh $name "; then
+    if cron_has "sched-run.sh $name "; then
       echo -e "  ${YELLOW}⚠${NC}  Cron entry for '$name' already exists"
     else
-      (echo "$CRONTAB"; echo "$cron_line") | crontab -
+      cron_add "$cron_line"
       echo -e "  ${GREEN}✓${NC}  Job '$name' scheduled: $schedule  ${DIM}[$cron_expr]${NC}"
     fi
     ;;
@@ -214,8 +236,7 @@ print(j['cmd'] if j else '')
     name="${2:-}"
     [ -z "$name" ] && { echo "Usage: axis sched pause <name>"; exit 1; }
     # Remove from crontab
-    CRONTAB=$(crontab -l 2>/dev/null || echo "")
-    echo "$CRONTAB" | grep -vF "sched-run.sh $name " | crontab -
+    cron_del "sched-run.sh $name "
     python3 - "$STORE" "$name" "true" <<'EOF'
 import json, sys
 from pathlib import Path
@@ -242,11 +263,10 @@ if j: print(j['cron'] + ' bash $WRAPPER ' + '$name' + ' ' + j['cmd'])
     if [ -z "$job" ]; then
       echo "  (job '$name' not found)"; exit 1
     fi
-    CRONTAB=$(crontab -l 2>/dev/null || echo "")
-    if echo "$CRONTAB" | grep -qF "sched-run.sh $name "; then
+    if cron_has "sched-run.sh $name "; then
       echo "  (already active)"
     else
-      (echo "$CRONTAB"; echo "$job") | crontab -
+      cron_add "$job"
     fi
     python3 - "$STORE" "$name" "false" <<'EOF'
 import json, sys
@@ -264,8 +284,7 @@ EOF
   del|delete|rm)
     name="${2:-}"
     [ -z "$name" ] && { echo "Usage: axis sched del <name>"; exit 1; }
-    CRONTAB=$(crontab -l 2>/dev/null || echo "")
-    echo "$CRONTAB" | grep -vF "sched-run.sh $name " | crontab -
+    cron_del "sched-run.sh $name "
     python3 - "$STORE" "$name" <<'EOF'
 import json, sys
 from pathlib import Path
