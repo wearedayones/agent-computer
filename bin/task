@@ -102,15 +102,18 @@ EOF
     [ -z "$2" ] && { echo "Usage: task done <id>"; exit 1; }
     python3 - "$STORE" "$2" <<'EOF'
 import json, sys
+DIM, NC = "\033[2m", "\033[0m"
 with open(sys.argv[1]) as f: d = json.load(f)
 tid = int(sys.argv[2])
-found = False
+found = False; desc = ""
 for t in d["tasks"]:
     if t["id"] == tid:
-        t["status"] = "done"; found = True; break
+        t["status"] = "done"; found = True; desc = t.get("desc",""); break
 if not found: print(f"  Task #{tid} not found"); sys.exit(1)
 with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
 print(f"  \033[32m✓\033[0m  Task #{tid} marked done")
+print(f"\n  {DIM}Log this outcome so future agents learn from it:{NC}")
+print(f"  axis trace log \"{desc}\" --outcome success --detail \"<what you did>\"")
 EOF
     ;;
 

@@ -57,12 +57,56 @@ fi
 echo "  Cron:      $CRON_COUNT active jobs"
 echo "  Last sync: $LAST_SYNC_TS"
 
+# ── Silent session detection ──────────────────────────────────────────────────
+# If the previous session changed files but left no note, warn loudly.
+python3 - "$HOME" <<'PYEOF'
+import sys, os
+from pathlib import Path
+from datetime import datetime, timezone
+
+RED, YELLOW, BOLD, DIM, NC = "\033[0;31m", "\033[1;33m", "\033[1m", "\033[2m", "\033[0m"
+home = Path(sys.argv[1])
+inbox = home / "inbox"
+
+# Most recent auto-brief (session-brief.sh output)
+briefs = sorted(inbox.glob("session-*-brief.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+# Most recent manual note (not a session-brief)
+notes  = sorted([f for f in inbox.glob("*.md") if "brief" not in f.name and "session" not in f.name],
+                key=lambda f: f.stat().st_mtime, reverse=True)
+
+if not briefs:
+    sys.exit(0)
+
+latest_brief = briefs[0]
+latest_note_mtime = notes[0].stat().st_mtime if notes else 0
+brief_mtime = latest_brief.stat().st_mtime
+
+# Brief is newer than last manual note → check if files were actually changed
+if brief_mtime > latest_note_mtime:
+    content = latest_brief.read_text()
+    # Count file modification lines (lines starting with "- ~/")
+    changed_files = [l.strip() for l in content.splitlines() if l.strip().startswith("- ~/")]
+    if len(changed_files) >= 1:
+        brief_date = datetime.fromtimestamp(brief_mtime).strftime("%Y-%m-%d %H:%M")
+        print(f"\n{RED}── ⚠  UNDOCUMENTED SESSION ({brief_date}){NC}")
+        print(f"  Previous agent modified {BOLD}{len(changed_files)} file(s){NC} but left {RED}no note{NC}.")
+        print(f"  You are inheriting changes with no explanation.")
+        for f in changed_files[:5]:
+            print(f"  {DIM}{f}{NC}")
+        if len(changed_files) > 5:
+            print(f"  {DIM}... and {len(changed_files)-5} more{NC}")
+        print(f"  Review: {DIM}cat ~/inbox/{latest_brief.name}{NC}")
+        print(f"  {YELLOW}When YOUR session ends, run: note \"<what you did>\"{NC}")
+PYEOF
+
 # ── Inbox ─────────────────────────────────────────────────────────────────────
 if [ "$INBOX" -gt 0 ]; then
   echo -e "\n${YELLOW}── Inbox ($INBOX message(s)) — read with: cat ~/inbox/<file>${NC}"
   for f in "$HOME/inbox/"*.md; do
     [ -f "$f" ] || continue
     name=$(basename "$f")
+    # Skip session briefs in listing (they're auto-generated, not agent notes)
+    [[ "$name" == session-* ]] && continue
     summary=$(grep -m1 "^[^#|*\-]" "$f" 2>/dev/null | head -c 120 || true)
     [ -z "$summary" ] && summary=$(grep -m1 "^\-" "$f" 2>/dev/null | sed 's/^- //' | head -c 120 || true)
     [ -z "$summary" ] && summary="(no summary)"

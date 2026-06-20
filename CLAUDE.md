@@ -6,101 +6,112 @@
 
 ---
 
-## Your Workspace
+## Why Protocol Compliance Matters
 
-**Your workspace is `$HOME`. That is the computer.**
+This computer is shared across multiple AI agents over time. You are not the first. You are not the last.
 
-The authoritative files are the ones already installed — `~/bin/`, `~/system/`, `~/scripts/`. Everything you do lives under `$HOME` in the correct zone (see Zone Map in `~/AGENT.md`).
+**When you skip the protocol, you break the next agent:**
+- Skip `boot` → you act on stale context. You repeat work that was already done. You undo changes that were intentional.
+- Skip `note` → the next agent inherits invisible state. They cannot tell what you changed, why, or what broke. They will make wrong decisions.
+- Skip `trace` → outcome memory fails. The next agent runs the same failed strategy, makes the same mistake, wastes the same time.
+- Skip `task` → the work queue falls out of sync. Tasks get done twice or never.
+
+One undisciplined agent degrades every agent that follows. This is not a guideline — it is the load-bearing structure of the system.
 
 ---
 
 ## Session Startup — MANDATORY, NO EXCEPTIONS
 
-**Step 1: Run boot. Do it before you read anything else, before you touch any file.**
+**Step 1: Run boot. Before you read anything else. Before you touch any file.**
 
 ```bash
 boot
 ```
 
 `boot` shows: disk health, active sessions, cron count, and **inbox messages from the previous agent**.
-If you skip it, you are flying blind. The owner will not tell you what the last agent did — that's what the inbox is for.
+If `boot` shows a red `⚠ UNDOCUMENTED SESSION` warning — the previous agent left no note. Treat everything as uncertain. Read the session brief before acting.
 
 **If `boot` shows inbox messages — read and act on them before doing anything else.**
 **If `boot` shows disk < 2GB — free space before doing anything else.**
 
 ---
 
-## Session End — Write to Inbox if ANY of these are true
+## Session End Checklist — Run Through This Before Closing
 
+**1. Did you do any meaningful work?**
 ```bash
-note "your message"    # → ~/inbox/ — next agent reads this on boot
+note "what you did, what's left, what to watch for"
 ```
 
-**You MUST write a note if:**
-- You did meaningful work (finished a feature, fixed a bug, made a config change)
-- You left something half-done or paused mid-task
-- You discovered a problem you didn't fix
-- You changed a cron job, service, or background process
-- You modified a protected path or a shared config
-- The owner gave you a task that spans multiple sessions
-- Anything broke and you want the next agent to know
+**You MUST write a note if ANY of these are true:**
+- You changed any file, config, cron job, or background process
+- You completed or abandoned a task
+- You discovered a problem — even one you didn't fix
+- You added a dependency, key, or service
+- The owner gave you a task spanning multiple sessions
+- Anything broke, even temporarily
 
-**You do NOT need a note if:**
-- You only answered a question (no files changed)
-- `boot` inbox was empty and you changed nothing
+**You do NOT need a note only if:** you answered a question and changed absolutely nothing.
 
-One note per session is enough. Be specific: what you did, what's left, what to watch for.
+**2. Did you complete a task?**
+```bash
+axis task done <id>
+axis trace log "<what you did>" --outcome success|fail --detail "<why it worked or why it failed>"
+```
+
+Trace is the anti-amnesia layer. Without it, the next agent repeats your work from scratch. If you completed something hard, or failed at something, **log it**.
+
+**3. Did you run `map`?**
+```bash
+map
+```
+Always regenerate README.md after changes. It is the live state snapshot other agents read.
 
 ---
 
-## File Rules (read carefully — agents often get these wrong)
+## File Rules — Agents Get These Wrong Most Often
 
-### Flat files — never nest unnecessarily
+### Never nest unnecessarily
 ```
-✓  ~/documents/links.md
-✗  ~/documents/links/links.md
-
 ✓  ~/documents/notes.md
 ✗  ~/documents/notes/notes.md
 ```
-Only create a subfolder inside a zone if you have **multiple related files** that belong together.
+Only create a subfolder if you have **multiple related files** that belong together.
 
 ### Always check before creating
 ```bash
-ls ~/documents/          # does the file already exist?
+ls ~/documents/     # does the file exist?
 cat ~/documents/foo.md   # read it before writing
 ```
 
-### Zone rules
+### Zone map
 | Type | Zone |
 |------|------|
 | New app / bot | `~/apps/<name>/` |
 | New project | `~/projects/<name>/` |
 | New script | `~/scripts/` |
 | Notes / docs | `~/documents/` |
-| Images | `~/media/images/` |
-| Videos | `~/media/videos/` |
-| Audio | `~/media/audio/` |
+| Images / video / audio | `~/media/<type>/` |
 | Temp files | `~/downloads/` |
 | Python venvs | `~/apps/envs/<name>/` |
-| **Root** | **NOTHING** — only AGENT.md, CLAUDE.md, README.md |
+| **Root (`~`)** | **Nothing** — only AGENT.md, CLAUDE.md, README.md |
 
 ---
 
 ## Inter-Agent Messages → `note`, not files
 
 ```bash
-note "your message"    # → ~/inbox/ (next agent sees this on boot)
+note "your message"    # → ~/inbox/ — next agent reads this on boot
 ```
 
-Never create files in `~/documents/` to leave messages. Use `note`.
+Never create files in `~/documents/` to pass messages to the next agent. The next agent reads `boot`, not your document files.
 
 ---
 
 ## After Every Change
 
 ```bash
-map    # regenerate README.md — always do this
+map    # regenerate README.md — always
 ```
 
 ---
@@ -108,27 +119,26 @@ map    # regenerate README.md — always do this
 ## Never Delete Without Archiving
 
 ```bash
-mv ~/apps/old-bot ~/archive/old-bot   # ✓ archive first
+mv ~/apps/old-bot ~/archive/old-bot   # ✓
 rm -rf ~/apps/old-bot                 # ✗ never
 ```
 
 ---
 
-## Never Touch Protected Paths
-
-Add this computer's protected paths below (customize per installation):
+## Protected Paths — Never Touch
 
 ```
-# Example:
-# ~/keys/          — API credentials, read-only
-# ~/some-app/db/   — live database, never touch
+~/keys/                           — API credentials, read-only
+~/.hermes/                        — Hermes agent, managed externally
+~/.bybit/                         — trading bot, active logs
+~/apps/social-factory/tokens/     — OAuth tokens, read-only
 ```
 
 ---
 
 ## Permission Mode
 `bypassPermissions` — no confirmation prompts for normal operations.
-**Real-money or destructive actions — always confirm with the owner first.**
+**Real-money trades, destructive actions, external posts — always confirm with the owner first.**
 
 ---
 
@@ -136,21 +146,17 @@ Add this computer's protected paths below (customize per installation):
 
 | Command | Action |
 |---------|--------|
-| `boot` | Session startup |
-| `check` | Full color health report |
+| `boot` | Session startup — run first, always |
+| `check` | Full health report |
 | `map` | Regenerate README.md |
 | `update` | Pull latest from GitHub |
-| `note "msg"` | Leave message for next agent |
-| `export` | Package for migration |
-| `memory set/get/list/del` | Cross-session persistent knowledge |
-| `task add/list/done/del` | Work queue surviving context resets |
-| `budget log/show` | Cost and spend tracking |
-| `log today/week/errors` | Activity viewer |
-| `snapshot` | Archive current state |
+| `note "msg"` | Leave handoff for next agent |
+| `axis trace log "..." --outcome success\|fail` | Log outcome to memory |
+| `axis task add/list/done` | Work queue |
+| `axis ctx brief` | LLM-ready state brief |
+| `axis env show` | Machine mission + constraints |
+| `axis trace last` | What worked / what failed |
+| `axis doctor` | Deep diagnostics incl. session discipline |
+| `budget log/show` | Spend tracking |
 | `secret list/get` | Safe access to ~/keys/ |
-| `plan show/set/add/done` | Session work plan |
-| `agent list/add/ping` | Agent registry with live status |
-| `mcp list/add/status` | MCP server management |
-| `cron list/add/del` | Manage cron jobs by number |
-| `msg <agent> "text"` | Message a specific agent's inbox |
-| `cfg set/get/show <app>` | Manage .env config files for apps |
+| `export` | Package for migration |
