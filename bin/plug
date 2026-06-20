@@ -1,0 +1,141 @@
+#!/bin/bash
+# plug — plugin manager for axis extensions (Agent Computer v4)
+# Plugins live in ~/plugins/<name>/ with a cmd executable and manifest.json
+# Usage: plug list
+#        plug install <path>
+#        plug uninstall <name>
+#        plug info <name>
+
+PLUGINS_DIR="$HOME/plugins"
+mkdir -p "$PLUGINS_DIR"
+
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BOLD='\033[1m'
+CYAN='\033[0;36m'; DIM='\033[2m'; NC='\033[0m'
+
+cmd="${1:-list}"
+
+case "$cmd" in
+  list)
+    plugins=($(ls "$PLUGINS_DIR" 2>/dev/null))
+    if [ ${#plugins[@]} -eq 0 ] || [ -z "${plugins[0]}" ]; then
+      echo -e "\n  (no plugins installed — install with: axis plug install <path>)\n"
+      exit 0
+    fi
+    echo ""
+    echo -e "  ${BOLD}Installed Plugins${NC}\n"
+    printf "  %-20s  %-10s  %s\n" "NAME" "VERSION" "DESCRIPTION"
+    echo "  ──────────────────────────────────────────────────────"
+    for name in "${plugins[@]}"; do
+      pdir="$PLUGINS_DIR/$name"
+      [ -d "$pdir" ] || continue
+      manifest="$pdir/manifest.json"
+      if [ -f "$manifest" ]; then
+        version=$(python3 -c "import json; d=json.load(open('$manifest')); print(d.get('version','-'))" 2>/dev/null || echo "-")
+        desc=$(python3 -c "import json; d=json.load(open('$manifest')); print(d.get('description',''))" 2>/dev/null || echo "")
+      else
+        version="-"; desc="(no manifest)"
+      fi
+      has_cmd=""; [ -x "$pdir/cmd" ] && has_cmd=" ${DIM}✓ cmd${NC}"
+      printf "  ${CYAN}%-20s${NC}  ${DIM}%-10s${NC}  %s%s\n" "$name" "$version" "$desc" "$has_cmd"
+    done
+    echo ""
+    echo -e "  ${DIM}Plugins are invoked via: axis <plugin-name> [args]${NC}"
+    echo ""
+    ;;
+
+  install)
+    src="${2:-}"
+    [ -z "$src" ] && { echo "Usage: axis plug install <path>"; exit 1; }
+    [ -d "$src" ] || { echo "  ✗  Not a directory: $src"; exit 1; }
+    name=$(basename "$src")
+    dst="$PLUGINS_DIR/$name"
+    if [ -d "$dst" ]; then
+      echo -e "  ${YELLOW}⚠${NC}  Plugin '$name' already installed — uninstall first"
+      exit 1
+    fi
+    cp -r "$src" "$dst"
+    [ -f "$dst/cmd" ] && chmod +x "$dst/cmd"
+    echo -e "  ${GREEN}✓${NC}  Plugin '$name' installed to ~/plugins/$name/"
+    if [ ! -f "$dst/manifest.json" ]; then
+      echo -e "  ${YELLOW}⚠${NC}  No manifest.json found — creating minimal one"
+      cat > "$dst/manifest.json" <<MANIFEST
+{
+  "name": "$name",
+  "version": "1.0.0",
+  "description": "No description provided.",
+  "commands": ["$name"]
+}
+MANIFEST
+    fi
+    if [ ! -f "$dst/cmd" ]; then
+      echo -e "  ${YELLOW}⚠${NC}  No 'cmd' executable found — create $dst/cmd to handle axis $name invocations"
+    fi
+    ;;
+
+  uninstall)
+    name="${2:-}"
+    [ -z "$name" ] && { echo "Usage: axis plug uninstall <name>"; exit 1; }
+    pdir="$PLUGINS_DIR/$name"
+    if [ ! -d "$pdir" ]; then
+      echo "  (plugin '$name' not installed)"; exit 1
+    fi
+    # Archive before removing
+    archive="$HOME/archive/plugin-$name-$(date -u +%Y%m%d-%H%M%S)"
+    mkdir -p "$(dirname "$archive")"
+    mv "$pdir" "$archive"
+    echo -e "  ${GREEN}✓${NC}  Plugin '$name' uninstalled (archived to ~/archive/)"
+    ;;
+
+  info)
+    name="${2:-}"
+    [ -z "$name" ] && { echo "Usage: axis plug info <name>"; exit 1; }
+    pdir="$PLUGINS_DIR/$name"
+    [ -d "$pdir" ] || { echo "  (plugin '$name' not installed)"; exit 1; }
+    echo ""
+    echo -e "  ${BOLD}Plugin: $name${NC}"
+    echo -e "  ${DIM}Path: ~/plugins/$name/${NC}\n"
+    if [ -f "$pdir/manifest.json" ]; then
+      python3 - "$pdir/manifest.json" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+BOLD, NC, DIM = "\033[1m", "\033[0m", "\033[2m"
+for k, v in d.items():
+    print(f"  {k:<15} {v}")
+EOF
+    else
+      echo "  (no manifest.json)"
+    fi
+    echo ""
+    ls "$pdir/" | sed 's/^/  /'
+    echo ""
+    ;;
+
+  new)
+    # Scaffold a new plugin in current directory
+    name="${2:-}"
+    [ -z "$name" ] && { echo "Usage: axis plug new <name>"; exit 1; }
+    dst="$PWD/$name"
+    mkdir -p "$dst"
+    cat > "$dst/manifest.json" <<MANIFEST
+{
+  "name": "$name",
+  "version": "1.0.0",
+  "description": "Describe what $name does.",
+  "commands": ["$name"]
+}
+MANIFEST
+    cat > "$dst/cmd" <<CMDEOF
+#!/bin/bash
+# $name plugin — invoked via: axis $name [args]
+echo "  Hello from $name plugin! Args: \$*"
+CMDEOF
+    chmod +x "$dst/cmd"
+    echo -e "  ${GREEN}✓${NC}  Plugin scaffold created at ./$name/"
+    echo -e "  ${DIM}Edit $dst/cmd, then: axis plug install ./$name${NC}"
+    ;;
+
+  *)
+    echo "Usage: axis plug list|install|uninstall|info|new <args>"
+    exit 1
+    ;;
+esac

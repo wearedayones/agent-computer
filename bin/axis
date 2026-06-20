@@ -955,9 +955,17 @@ case "${1:-}" in
   env)                     shift; exec bash "$H/system/env.sh" "$@" ;;
   ctx)                     shift; exec bash "$H/system/ctx.sh" "$@" ;;
   metric)                  shift; exec bash "$H/system/metric.sh" "$@" ;;
-  skill)                   shift; exec bash "$H/bin/skill" "$@" 2>/dev/null || { echo "  skill — coming in v4.0 Phase 3"; exit 1; } ;;
-  sched)                   shift; exec bash "$H/bin/sched" "$@" 2>/dev/null || { echo "  sched — coming in v4.0 Phase 3"; exit 1; } ;;
-  dash)                    shift; exec bash "$H/bin/dash" "$@" 2>/dev/null || { echo "  dash — coming in v4.0 Phase 2"; exit 1; } ;;
-  plug)                    shift; exec bash "$H/bin/plug" "$@" 2>/dev/null || { echo "  plug — coming in v4.0 Phase 3"; exit 1; } ;;
-  *)                       cmd_delegate "$@" ;;
+  # v4.1 Visibility Layer
+  dash)                    shift; exec bash "$H/bin/dash" "$@" ;;
+  # v4.0 Platform Layer
+  skill)                   shift; exec bash "$H/bin/skill" "$@" ;;
+  sched)                   shift; exec bash "$H/bin/sched" "$@" ;;
+  plug)                    shift; exec bash "$H/bin/plug" "$@" ;;
+  *)
+    # Plugin auto-discovery: axis <name> → ~/plugins/<name>/cmd
+    if [ -x "$H/plugins/$1/cmd" ]; then
+      plugin="$1"; shift
+      exec bash "$H/plugins/$plugin/cmd" "$@"
+    fi
+    cmd_delegate "$@" ;;
 esac
