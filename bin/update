@@ -1,3 +1,3 @@
 #!/bin/bash
 # update — pull latest agent computer infrastructure from GitHub
-exec bash /home/ubuntu/scripts/auto-update.sh "$@"
+exec bash $HOME/scripts/auto-update.sh "$@"

@@ -301,7 +301,7 @@ EOF
   local key_count
   key_count=$(ls "$H/keys/" 2>/dev/null | wc -l | tr -d ' ')
   local empty_keys
-  empty_keys=$(find "$H/keys/" -empty 2>/dev/null | wc -l | tr -d ' ')
+  empty_keys=$(find "$H/keys/" -maxdepth 1 -type f -empty 2>/dev/null | wc -l | tr -d ' ')
   ok "$key_count key file(s) in ~/keys/"
   [ "$empty_keys" -gt 0 ] && fail "$empty_keys empty key file(s)" && ERRORS=$((ERRORS+1))
 

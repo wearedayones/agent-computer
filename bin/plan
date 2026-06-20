@@ -30,7 +30,6 @@ case "$cmd" in
 
 ## Steps
 
-- [ ] (add steps with: plan add "step")
 EOF
     echo "  ✓  Plan created: $title"
     echo "  Add steps: plan add \"description\""
