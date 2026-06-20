@@ -59,6 +59,8 @@ apply "scripts/session-brief.sh"  "scripts/session-brief.sh"
 apply "scripts/vps-map.sh"        "scripts/vps-map.sh"
 apply "scripts/vps-export.sh"     "scripts/vps-export.sh"
 apply "scripts/vps-sync.sh"       "scripts/vps-sync.sh"
+apply "scripts/dash-server.py"    "scripts/dash-server.py"
+apply "scripts/alert-eval.sh"     "scripts/alert-eval.sh"
 
 for f in "$SRC/bin/"*; do
   [ -f "$f" ] && apply "bin/$(basename "$f")" "bin/$(basename "$f")"

@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1,
+    "expr": "disk_used_pct > 90",
+    "label": "Disk usage critical (>90%)",
+    "action": "inbox",
+    "cooldown_h": 24
+  },
+  {
+    "id": 2,
+    "expr": "disk_free_gb < 2",
+    "label": "Disk free < 2 GB",
+    "action": "inbox",
+    "cooldown_h": 12
+  }
+]

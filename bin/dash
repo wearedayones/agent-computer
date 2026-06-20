@@ -1,0 +1,92 @@
+#!/bin/bash
+# dash — lightweight web dashboard (Agent Computer v4)
+# Usage: axis dash start [--port N] [--bind addr] [--token secret]
+#        axis dash stop
+#        axis dash status
+#        axis dash url
+
+TMUX_SESSION="dash"
+SERVER="$HOME/scripts/dash-server.py"
+PORT_FILE="$HOME/system/.dash-port"
+BIND_FILE="$HOME/system/.dash-bind"
+
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'; BOLD='\033[1m'
+
+cmd="${1:-status}"
+
+case "$cmd" in
+  start)
+    shift
+    port=2222; bind="127.0.0.1"; token=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --port)  port="$2";  shift 2 ;;
+        --bind)  bind="$2";  shift 2 ;;
+        --token) token="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+      echo -e "  ${YELLOW}⚠${NC}  dash is already running — use 'axis dash stop' first"
+      exit 1
+    fi
+    echo "$port" > "$PORT_FILE"
+    echo "$bind" > "$BIND_FILE"
+    token_arg=""
+    [ -n "$token" ] && token_arg="--token $token"
+    tmux new-session -d -s "$TMUX_SESSION" \
+      "python3 $SERVER --port $port --bind $bind $token_arg"
+    sleep 0.6
+    if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+      echo -e "  ${GREEN}✓${NC}  dash started"
+      echo -e "  ${BOLD}URL${NC}    http://${bind}:${port}"
+      if [ "$bind" = "127.0.0.1" ]; then
+        HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "<host>")
+        echo -e "  ${BOLD}Tunnel${NC} ssh -L ${port}:localhost:${port} $(whoami)@${HOST_IP}"
+      fi
+    else
+      echo -e "  ✗  dash failed to start"
+      echo "  Check: tmux attach -t dash"
+      exit 1
+    fi
+    ;;
+
+  stop)
+    if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+      tmux kill-session -t "$TMUX_SESSION"
+      rm -f "$PORT_FILE" "$BIND_FILE"
+      echo -e "  ${GREEN}✓${NC}  dash stopped"
+    else
+      echo "  (dash is not running)"
+    fi
+    ;;
+
+  status)
+    if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+      port=$(cat "$PORT_FILE" 2>/dev/null || echo "2222")
+      bind=$(cat "$BIND_FILE" 2>/dev/null || echo "127.0.0.1")
+      echo -e "  ${GREEN}✓${NC}  dash running — http://${bind}:${port}"
+    else
+      echo "  (dash is not running — start with: axis dash start)"
+    fi
+    ;;
+
+  url)
+    if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+      port=$(cat "$PORT_FILE" 2>/dev/null || echo "2222")
+      bind=$(cat "$BIND_FILE" 2>/dev/null || echo "127.0.0.1")
+      echo "http://${bind}:${port}"
+    else
+      echo "  (dash is not running)"
+      exit 1
+    fi
+    ;;
+
+  *)
+    echo "Usage: axis dash start [--port N] [--bind addr] [--token secret]"
+    echo "       axis dash stop"
+    echo "       axis dash status"
+    echo "       axis dash url"
+    exit 1
+    ;;
+esac
