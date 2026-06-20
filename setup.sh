@@ -207,6 +207,16 @@ done
 [ "$LINKED" -gt 0 ] && ok "$LINKED commands linked to /usr/local/bin" \
   || warn "Could not link to /usr/local/bin (no sudo) — commands work in login shells only"
 
+# axis bash completion
+COMPLETION="$HOME_DIR/system/axis-completion.bash"
+if [ -f "$COMPLETION" ]; then
+  if sudo cp "$COMPLETION" /etc/bash_completion.d/axis 2>/dev/null; then
+    ok "axis tab-completion installed"
+  fi
+  grep -q "axis-completion" "$HOME_DIR/.bashrc" 2>/dev/null \
+    || echo "source $COMPLETION" >> "$HOME_DIR/.bashrc"
+fi
+
 # / root — machine-level discovery (any agent on this computer, any user)
 ROOT_LINKED=0
 for doc in AGENT.md CLAUDE.md README.md; do

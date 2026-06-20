@@ -16,8 +16,14 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 
 ## Shell Commands (`~/bin/` — all in PATH)
 
+**`axis`** is the master CLI — use it for everything. All commands below are also callable directly.
+
 | Command | Action |
 |---------|--------|
+| `axis` | Live status dashboard — system, work, agents at a glance |
+| `axis help` | Full categorized command reference |
+| `axis version` | Version info |
+| `axis <command> [args]` | Run any command below via axis |
 | `boot` | Session startup: disk, sessions, inbox, last changes |
 | `check` | Full color health report |
 | `map` | Regenerate README.md from live state |
