@@ -535,14 +535,83 @@ cmd_diff() {
   local snap
   snap=$(ls -dt "$H/archive/snapshot-"* 2>/dev/null | head -1)
   if [ -z "$snap" ]; then
-    warn "No snapshots found — run: axis snapshot"
+    warn "No snapshots found — run: snapshot"
+    echo -e "    ${DIM}Create one now: snapshot${NC}"
     exit 1
   fi
 
+  local snap_name snap_time
+  snap_name=$(basename "$snap")
+  snap_time=$(grep "^Created:" "$snap/manifest.txt" 2>/dev/null | sed 's/Created:  //' || echo "unknown")
+
   echo ""
-  echo -e "${BOLD}${CYAN}  AXIS DIFF — Changes since $(basename "$snap")${NC}"
+  echo -e "${BOLD}${CYAN}  AXIS DIFF${NC}"
+  echo -e "  ${DIM}Comparing now vs $snap_name ($snap_time)${NC}"
   bar
 
+  # ── Files ──────────────────────────────────────────────────────────────────
+  hdr "Files"
+  if [ -f "$snap/files.txt" ]; then
+    local current_files
+    current_files=$(mktemp)
+    find "$H" \
+      -path "$H/archive" -prune -o \
+      -path "$H/apps/envs" -prune -o \
+      -path "$H/.cache" -prune -o \
+      -path "$H/.local" -prune -o \
+      -path "*/node_modules" -prune -o \
+      -path "*/__pycache__" -prune -o \
+      -path "*/.git" -prune -o \
+      -type f -print 2>/dev/null | sort > "$current_files"
+
+    local added removed
+    added=$(comm -13 "$snap/files.txt" "$current_files" | sed "s|$H/||" | head -20)
+    removed=$(comm -23 "$snap/files.txt" "$current_files" | sed "s|$H/||" | head -20)
+    rm -f "$current_files"
+
+    if [ -n "$added" ]; then
+      echo "$added" | while IFS= read -r f; do echo -e "  ${GREEN}+${NC}  $f"; done
+      local a_count; a_count=$(echo "$added" | wc -l | tr -d ' ')
+      [ "$a_count" -ge 20 ] && echo -e "    ${DIM}(first 20 shown — more added files exist)${NC}"
+    fi
+    if [ -n "$removed" ]; then
+      echo "$removed" | while IFS= read -r f; do echo -e "  ${RED}-${NC}  $f"; done
+      local r_count; r_count=$(echo "$removed" | wc -l | tr -d ' ')
+      [ "$r_count" -ge 20 ] && echo -e "    ${DIM}(first 20 shown — more removed files exist)${NC}"
+    fi
+    [ -z "$added" ] && [ -z "$removed" ] && echo -e "    ${DIM}(no change)${NC}"
+  else
+    echo -e "    ${DIM}(snapshot predates file tracking — run: snapshot)${NC}"
+  fi
+
+  # ── Apps & Projects ────────────────────────────────────────────────────────
+  hdr "Apps & Projects"
+  if [ -f "$snap/files.txt" ]; then
+    # New apps
+    local old_apps new_apps
+    old_apps=$(grep "^$H/apps/[^/]*/[^/]*$" "$snap/files.txt" 2>/dev/null | awk -F/ '{print $(NF-1)}' | sort -u || true)
+    new_apps=$(find "$H/apps/" -maxdepth 1 -mindepth 1 -type d ! -name "envs" 2>/dev/null | xargs -I{} basename {} | sort)
+    local app_diff
+    app_diff=$(diff <(echo "$old_apps") <(echo "$new_apps") | grep "^[<>]" | \
+      sed 's/^< /  \x1b[31m- app\x1b[0m  /;s/^> /  \x1b[32m+ app\x1b[0m  /' || true)
+    # New projects
+    local old_proj new_proj
+    old_proj=$(grep "^$H/projects/[^/]*/[^/]*$" "$snap/files.txt" 2>/dev/null | awk -F/ '{print $(NF-1)}' | sort -u || true)
+    new_proj=$(find "$H/projects/" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | xargs -I{} basename {} | sort)
+    local proj_diff
+    proj_diff=$(diff <(echo "$old_proj") <(echo "$new_proj") | grep "^[<>]" | \
+      sed 's/^< /  \x1b[31m- project\x1b[0m  /;s/^> /  \x1b[32m+ project\x1b[0m  /' || true)
+    if [ -n "$app_diff" ] || [ -n "$proj_diff" ]; then
+      [ -n "$app_diff" ]  && echo "$app_diff"
+      [ -n "$proj_diff" ] && echo "$proj_diff"
+    else
+      echo -e "    ${DIM}(no change)${NC}"
+    fi
+  else
+    echo -e "    ${DIM}(no snapshot to compare)${NC}"
+  fi
+
+  # ── Tasks ──────────────────────────────────────────────────────────────────
   hdr "Tasks"
   if [ -f "$snap/tasks.json" ] && [ -f "$H/system/tasks.json" ]; then
     python3 - "$snap/tasks.json" "$H/system/tasks.json" <<'EOF'
@@ -552,32 +621,93 @@ old_ids={t['id']:t for t in old.get('tasks',[])}
 new_ids={t['id']:t for t in new.get('tasks',[])}
 added=[t for id,t in new_ids.items() if id not in old_ids]
 done=[t for id,t in new_ids.items() if id in old_ids and t.get('status')=='done' and old_ids[id].get('status')=='open']
+reopened=[t for id,t in new_ids.items() if id in old_ids and t.get('status')=='open' and old_ids[id].get('status')=='done']
 removed=[t for id,t in old_ids.items() if id not in new_ids]
-for t in added: print(f"  \033[32m+\033[0m  #{t['id']} {t['desc']}")
-for t in done:  print(f"  \033[36m✓\033[0m  #{t['id']} {t['desc']} (done)")
-for t in removed: print(f"  \033[31m-\033[0m  #{t['id']} {t['desc']}")
-if not added and not done and not removed: print("  (no change)")
+for t in added:    print(f"  \033[32m+\033[0m  #{t['id']} {t['desc']}")
+for t in done:     print(f"  \033[36m✓\033[0m  #{t['id']} {t['desc']} (done)")
+for t in reopened: print(f"  \033[33m~\033[0m  #{t['id']} {t['desc']} (reopened)")
+for t in removed:  print(f"  \033[31m-\033[0m  #{t['id']} {t['desc']} (removed)")
+if not any([added,done,reopened,removed]): print("    \033[2m(no change)\033[0m")
 EOF
   else
     echo -e "    ${DIM}(no task data in snapshot)${NC}"
   fi
 
+  # ── Memory ─────────────────────────────────────────────────────────────────
   hdr "Memory"
   if [ -f "$snap/memory.json" ] && [ -f "$H/system/memory.json" ]; then
     python3 - "$snap/memory.json" "$H/system/memory.json" <<'EOF'
 import json,sys
 old=json.load(open(sys.argv[1])); new=json.load(open(sys.argv[2]))
-for k in set(list(old)+list(new)):
+changed=False
+for k in sorted(set(list(old)+list(new))):
     ov=old.get(k); nv=new.get(k)
-    if ov is None: print(f"  \033[32m+\033[0m  {k}: {nv}")
-    elif nv is None: print(f"  \033[31m-\033[0m  {k}: {ov}")
-    elif ov!=nv: print(f"  \033[33m~\033[0m  {k}: {ov[:40]} → {nv[:40]}")
-if old==new: print("  (no change)")
+    if ov is None:
+        print(f"  \033[32m+\033[0m  {k}: {str(nv)[:60]}")
+        changed=True
+    elif nv is None:
+        print(f"  \033[31m-\033[0m  {k}: {str(ov)[:60]}")
+        changed=True
+    elif ov!=nv:
+        print(f"  \033[33m~\033[0m  {k}")
+        print(f"      was: {str(ov)[:60]}")
+        print(f"      now: {str(nv)[:60]}")
+        changed=True
+if not changed: print("    \033[2m(no change)\033[0m")
 EOF
   else
     echo -e "    ${DIM}(no memory data in snapshot)${NC}"
   fi
 
+  # ── Plan ───────────────────────────────────────────────────────────────────
+  hdr "Plan"
+  local plan_snap="$snap/plan.md"
+  local plan_cur="$H/system/plan.md"
+  if [ -f "$plan_snap" ] && [ -f "$plan_cur" ]; then
+    local plan_diff
+    plan_diff=$(diff "$plan_snap" "$plan_cur" | grep "^[<>]" | \
+      sed 's/^< /  \x1b[31m-\x1b[0m  /;s/^> /  \x1b[32m+\x1b[0m  /' || true)
+    if [ -n "$plan_diff" ]; then
+      echo "$plan_diff"
+    else
+      echo -e "    ${DIM}(no change)${NC}"
+    fi
+  elif [ ! -f "$plan_snap" ] && [ -f "$plan_cur" ]; then
+    echo -e "  ${GREEN}+${NC}  Plan created: $(grep '^# Plan:' "$plan_cur" | sed 's/# Plan: //')"
+  elif [ -f "$plan_snap" ] && [ ! -f "$plan_cur" ]; then
+    echo -e "  ${RED}-${NC}  Plan cleared"
+  else
+    echo -e "    ${DIM}(no plan)${NC}"
+  fi
+
+  # ── Configs ────────────────────────────────────────────────────────────────
+  hdr "Configs (.env)"
+  if [ -d "$snap/configs" ]; then
+    local cfg_changed=0
+    find "$H/apps" "$H/projects" -name ".env" -type f 2>/dev/null | while read -r env; do
+      rel="${env#$H/}"
+      snap_cfg="$snap/configs/$(echo "$rel" | tr '/' '_')"
+      if [ ! -f "$snap_cfg" ]; then
+        echo -e "  ${GREEN}+${NC}  $rel (new)"
+      else
+        local cfg_diff
+        cfg_diff=$(diff "$snap_cfg" "$env" | grep "^[<>]" | \
+          sed "s|^< |  \x1b[31m- $rel: \x1b[0m|;s|^> |  \x1b[32m+ $rel: \x1b[0m|" || true)
+        [ -n "$cfg_diff" ] && echo "$cfg_diff"
+      fi
+    done
+    # Removed configs
+    for snap_cfg in "$snap/configs/"*; do
+      [ -f "$snap_cfg" ] || continue
+      orig_rel=$(basename "$snap_cfg" | tr '_' '/')
+      [ ! -f "$H/$orig_rel" ] && echo -e "  ${RED}-${NC}  $orig_rel (removed)"
+    done
+    echo -e "    ${DIM}(no .env changes)${NC}" 2>/dev/null || true
+  else
+    echo -e "    ${DIM}(snapshot predates config tracking — run: snapshot)${NC}"
+  fi
+
+  # ── Cron ───────────────────────────────────────────────────────────────────
   hdr "Cron"
   if [ -f "$snap/crontab.txt" ]; then
     local cron_diff

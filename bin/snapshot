@@ -52,6 +52,27 @@ case "${1:-create}" in
 
     crontab -l 2>/dev/null > "$SNAP_DIR/crontab.txt" && echo "  ✓  crontab.txt"
 
+    # Zone file listing — used by axis diff to show added/removed files
+    find "$HOME" \
+      -path "$HOME/archive" -prune -o \
+      -path "$HOME/apps/envs" -prune -o \
+      -path "$HOME/.cache" -prune -o \
+      -path "$HOME/.local" -prune -o \
+      -path "*/node_modules" -prune -o \
+      -path "*/__pycache__" -prune -o \
+      -path "*/.git" -prune -o \
+      -type f -print 2>/dev/null | sort > "$SNAP_DIR/files.txt" && echo "  ✓  files.txt"
+
+    # App configs snapshot
+    find "$HOME/apps" "$HOME/projects" -name ".env" -type f 2>/dev/null | while read -r env; do
+      rel="${env#$HOME/}"
+      dest="$SNAP_DIR/configs/$(echo "$rel" | tr '/' '_')"
+      mkdir -p "$SNAP_DIR/configs"
+      cp "$env" "$dest" 2>/dev/null || true
+    done
+    cfg_count=$(ls "$SNAP_DIR/configs/" 2>/dev/null | wc -l | tr -d ' ')
+    [ "${cfg_count:-0}" -gt 0 ] && echo "  ✓  configs/ ($cfg_count .env files)"
+
     DISK=$(df -h "$HOME" | awk 'NR==2{print $3"/"$2,"("$5")"}')
     cat > "$SNAP_DIR/manifest.txt" <<EOF
 Snapshot: $(basename "$SNAP_DIR")
