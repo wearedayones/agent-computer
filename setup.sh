@@ -88,18 +88,30 @@ mkdir -p \
   "$HOME_DIR/scripts" \
   "$HOME_DIR/system"
 
-# ── clone repo to permanent location ─────────────────────────────────────────
-echo "→ Cloning repo to ~/projects/agent-computer..."
-mkdir -p "$HOME_DIR/projects"
-if [ ! -d "$HOME_DIR/projects/agent-computer/.git" ]; then
-  git clone "$REPO_URL" "$HOME_DIR/projects/agent-computer" --quiet
-else
-  git -C "$HOME_DIR/projects/agent-computer" pull origin main --quiet
-fi
+# ── copy infrastructure files to root ────────────────────────────────────────
+echo "→ Installing infrastructure files..."
 
-# ── symlink infrastructure files to live locations ───────────────────────────
-echo "→ Linking files to live locations..."
-bash "$HOME_DIR/projects/agent-computer/link.sh"
+apply() {
+  local src="$SCRIPT_DIR/$1" dst="$HOME_DIR/$2"
+  [ -f "$src" ] || return
+  mkdir -p "$(dirname "$dst")"
+  cp "$src" "$dst"
+}
+
+apply "AGENT.md"                  "AGENT.md"
+apply "CLAUDE.md"                 "CLAUDE.md"
+apply "system/boot.sh"            "system/boot.sh"
+apply "system/health.sh"          "system/health.sh"
+apply "system/relocator.sh"       "system/relocator.sh"
+apply "scripts/auto-update.sh"    "scripts/auto-update.sh"
+apply "scripts/session-brief.sh"  "scripts/session-brief.sh"
+apply "scripts/vps-map.sh"        "scripts/vps-map.sh"
+apply "scripts/vps-export.sh"     "scripts/vps-export.sh"
+apply "scripts/vps-sync.sh"       "scripts/vps-sync.sh"
+
+for f in "$SCRIPT_DIR/bin/"*; do
+  [ -f "$f" ] && apply "bin/$(basename "$f")" "bin/$(basename "$f")"
+done
 
 # ── write version and lock file ───────────────────────────────────────────────
 INSTALLED_VERSION=$(cat "$SCRIPT_DIR/VERSION")
