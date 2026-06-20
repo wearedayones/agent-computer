@@ -88,21 +88,18 @@ mkdir -p \
   "$HOME_DIR/scripts" \
   "$HOME_DIR/system"
 
-# ── install files ─────────────────────────────────────────────────────────────
-echo "→ Installing infrastructure files..."
+# ── clone repo to permanent location ─────────────────────────────────────────
+echo "→ Cloning repo to ~/projects/agent-computer..."
+mkdir -p "$HOME_DIR/projects"
+if [ ! -d "$HOME_DIR/projects/agent-computer/.git" ]; then
+  git clone "$REPO_URL" "$HOME_DIR/projects/agent-computer" --quiet
+else
+  git -C "$HOME_DIR/projects/agent-computer" pull origin main --quiet
+fi
 
-cp "$SCRIPT_DIR/AGENT.md"  "$HOME_DIR/AGENT.md"
-cp "$SCRIPT_DIR/CLAUDE.md" "$HOME_DIR/CLAUDE.md"
-
-cp "$SCRIPT_DIR/scripts/"* "$HOME_DIR/scripts/"
-cp "$SCRIPT_DIR/system/"*  "$HOME_DIR/system/"
-cp "$SCRIPT_DIR/bin/"*     "$HOME_DIR/bin/"
-
-# ── make executable ───────────────────────────────────────────────────────────
-echo "→ Setting permissions..."
-chmod +x "$HOME_DIR/bin/"*
-chmod +x "$HOME_DIR/system/"*.sh
-chmod +x "$HOME_DIR/scripts/"*.sh
+# ── symlink infrastructure files to live locations ───────────────────────────
+echo "→ Linking files to live locations..."
+bash "$HOME_DIR/projects/agent-computer/link.sh"
 
 # ── write version and lock file ───────────────────────────────────────────────
 INSTALLED_VERSION=$(cat "$SCRIPT_DIR/VERSION")
@@ -172,8 +169,8 @@ add_cron "*/15 * * * * bash $HOME_DIR/system/relocator.sh >> $HOME_DIR/system/re
 # Map: every hour
 add_cron "0 * * * * bash $HOME_DIR/scripts/vps-map.sh >> /dev/null 2>&1" "vps-map"
 
-# Auto-update: daily at 06:00 UTC
-add_cron "0 6 * * * bash $HOME_DIR/scripts/auto-update.sh >> $HOME_DIR/system/update.log 2>&1" "auto-update"
+# Auto-update: every 15 min — git pull if available, tarball fallback
+add_cron "*/15 * * * * bash $HOME_DIR/scripts/auto-update.sh >> $HOME_DIR/system/update.log 2>&1" "auto-update"
 
 echo "$EXISTING" | crontab -
 
