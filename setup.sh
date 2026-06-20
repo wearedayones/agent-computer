@@ -175,6 +175,10 @@ apply "CLAUDE.md"                 "CLAUDE.md"
 apply "system/boot.sh"            "system/boot.sh"
 apply "system/health.sh"          "system/health.sh"
 apply "system/relocator.sh"       "system/relocator.sh"
+apply "system/trace.sh"           "system/trace.sh"
+apply "system/env.sh"             "system/env.sh"
+apply "system/ctx.sh"             "system/ctx.sh"
+apply "system/metric.sh"          "system/metric.sh"
 apply "scripts/auto-update.sh"    "scripts/auto-update.sh"
 apply "scripts/session-brief.sh"  "scripts/session-brief.sh"
 apply "scripts/vps-map.sh"        "scripts/vps-map.sh"
@@ -198,12 +202,9 @@ else
 fi
 
 # /usr/local/bin for all shell types (non-interactive, Claude Code, cron, etc.)
-# v4.0 internal scripts (axis subcommands only — not standalone): envdata ctx trace metric
-AXIS_ONLY="envdata ctx trace metric"
 LINKED=0
 for cmd in "$HOME_DIR/bin/"*; do
   fname="$(basename "$cmd")"
-  echo "$AXIS_ONLY" | grep -qw "$fname" && continue
   if sudo ln -sf "$cmd" "/usr/local/bin/$fname" 2>/dev/null; then
     LINKED=$((LINKED + 1))
   fi

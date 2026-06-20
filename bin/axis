@@ -167,10 +167,8 @@ cmd_doctor() {
   ok "All commands present in ~/bin/"
 
   local missing_links=0
-  local axis_only="envdata ctx trace metric"
   for cmd in "$H/bin/"*; do
     name=$(basename "$cmd")
-    echo "$axis_only" | grep -qw "$name" && continue
     [ -L "/usr/local/bin/$name" ] || missing_links=$((missing_links+1))
   done
   if [ "$missing_links" -eq 0 ]; then
@@ -952,11 +950,11 @@ case "${1:-}" in
   history)                 shift; cmd_history "$@" ;;
   help)                    shift; cmd_help "$@" ;;
   version|--version|-v)    cmd_version ;;
-  # v4.0 Intelligence Layer — run bin scripts by full path (not dependent on PATH)
-  trace)                   shift; exec bash "$H/bin/trace" "$@" ;;
-  env)                     shift; exec bash "$H/bin/envdata" "$@" ;;
-  ctx)                     shift; exec bash "$H/bin/ctx" "$@" ;;
-  metric)                  shift; exec bash "$H/bin/metric" "$@" ;;
+  # v4.0 Intelligence Layer — live in ~/system/ (not ~/bin/), never in PATH
+  trace)                   shift; exec bash "$H/system/trace.sh" "$@" ;;
+  env)                     shift; exec bash "$H/system/env.sh" "$@" ;;
+  ctx)                     shift; exec bash "$H/system/ctx.sh" "$@" ;;
+  metric)                  shift; exec bash "$H/system/metric.sh" "$@" ;;
   skill)                   shift; exec bash "$H/bin/skill" "$@" 2>/dev/null || { echo "  skill — coming in v4.0 Phase 3"; exit 1; } ;;
   sched)                   shift; exec bash "$H/bin/sched" "$@" 2>/dev/null || { echo "  sched — coming in v4.0 Phase 3"; exit 1; } ;;
   dash)                    shift; exec bash "$H/bin/dash" "$@" 2>/dev/null || { echo "  dash — coming in v4.0 Phase 2"; exit 1; } ;;
