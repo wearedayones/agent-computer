@@ -62,12 +62,43 @@ else
   echo "  (no changelog yet)"
 fi
 
+# ── Open Tasks ────────────────────────────────────────────────────────────────
+TASKS_FILE="$HOME/system/tasks.json"
+if [ -f "$TASKS_FILE" ]; then
+  OPEN_COUNT=$(python3 -c "
+import json
+with open('$TASKS_FILE') as f: d=json.load(f)
+print(len([t for t in d.get('tasks',[]) if t.get('status')=='open']))
+" 2>/dev/null || echo 0)
+  if [ "$OPEN_COUNT" -gt 0 ]; then
+    echo -e "\n${YELLOW}── Open Tasks ($OPEN_COUNT)${NC}"
+    python3 - "$TASKS_FILE" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+for t in d.get("tasks",[]):
+    if t.get("status") == "open":
+        print(f"  ○  #{t['id']}  {t['desc']}")
+PYEOF
+  fi
+fi
+
+# ── Active Plan ───────────────────────────────────────────────────────────────
+PLAN_FILE="$HOME/system/plan.md"
+if [ -f "$PLAN_FILE" ]; then
+  PLAN_TITLE=$(head -1 "$PLAN_FILE" | sed 's/^# Plan: //')
+  DONE_COUNT=$(grep "\[x\]" "$PLAN_FILE" 2>/dev/null | wc -l | tr -d ' ')
+  TODO_COUNT=$(grep "\[ \]" "$PLAN_FILE" 2>/dev/null | wc -l | tr -d ' ')
+  echo -e "\n${BLUE}── Active Plan${NC}"
+  echo "  $PLAN_TITLE  ($DONE_COUNT done · $TODO_COUNT remaining)"
+  grep "^\- \[ \]" "$PLAN_FILE" | head -3 | sed 's/^- \[ \] /  ○  /'
+fi
+
 # ── Quick commands ────────────────────────────────────────────────────────────
 echo -e "\n${BLUE}── Quick Commands${NC}"
 echo "  check                  full health report"
+echo "  task list              open work queue"
+echo "  plan show              active session plan"
 echo "  map                    refresh README.md"
-echo "  update                 pull latest from GitHub"
 echo "  note \"msg\"             leave a message for next agent"
-echo "  export --include-secrets  package VPS for migration"
 echo "  cat ~/AGENT.md         full operating guide"
 echo ""

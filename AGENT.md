@@ -51,6 +51,14 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 | `plan add "step"` | Add a step to current plan |
 | `plan done "step"` | Mark a step complete |
 | `plan clear` | Remove active plan |
+| `agent list` | Show all registered agents with live status |
+| `agent add <name> "desc"` | Register an agent |
+| `agent ping <name>` | Check if an agent is alive |
+| `agent del <name>` | Remove from registry |
+| `mcp list` | Show configured MCP servers |
+| `mcp add <name> <cmd> [args]` | Register an MCP server |
+| `mcp del <name>` | Remove an MCP server |
+| `mcp status` | Check which MCP commands are installed |
 
 ---
 

@@ -1,0 +1,113 @@
+#!/bin/bash
+# mcp — MCP (Model Context Protocol) server management
+# Usage: mcp list
+#        mcp add <name> <command> [arg1 arg2 ...]
+#        mcp del <name>
+#        mcp show <name>
+#        mcp status
+
+MCP_CONFIG="$HOME/.claude/claude_desktop_config.json"
+
+# Ensure config exists
+if [ ! -f "$MCP_CONFIG" ]; then
+  echo '{"mcpServers":{}}' > "$MCP_CONFIG"
+fi
+
+cmd="${1:-list}"
+
+case "$cmd" in
+  list)
+    python3 - "$MCP_CONFIG" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+servers = d.get("mcpServers", {})
+if not servers:
+    print("  (no MCP servers configured)")
+    print("  Add one: mcp add <name> <command> [args...]")
+    sys.exit(0)
+print(f"\n  MCP Servers ({len(servers)} configured)\n")
+print(f"  {'Name':<20} Command")
+print(f"  {'─'*20} {'─'*30}")
+for name, cfg in servers.items():
+    cmd = cfg.get("command","")
+    args = " ".join(cfg.get("args",[]))
+    full = f"{cmd} {args}".strip()[:50]
+    print(f"  {name:<20} {full}")
+print("")
+EOF
+    ;;
+
+  add)
+    [ -z "$2" ] && { echo "Usage: mcp add <name> <command> [arg1 arg2 ...]"; exit 1; }
+    [ -z "$3" ] && { echo "Usage: mcp add <name> <command> [arg1 arg2 ...]"; exit 1; }
+    name="$2"; command="$3"; shift 3
+    args=("$@")
+    python3 - "$MCP_CONFIG" "$name" "$command" "${args[@]+"${args[@]}"}" <<'EOF'
+import json, sys
+store, name, command = sys.argv[1], sys.argv[2], sys.argv[3]
+args = sys.argv[4:] if len(sys.argv) > 4 else []
+with open(store) as f: d = json.load(f)
+d.setdefault("mcpServers", {})[name] = {"command": command, "args": args}
+with open(store, "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  MCP server '{name}' added")
+print(f"     Restart Claude Code to activate")
+EOF
+    ;;
+
+  del|delete|rm)
+    [ -z "$2" ] && { echo "Usage: mcp del <name>"; exit 1; }
+    python3 - "$MCP_CONFIG" "$2" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+name = sys.argv[2]
+if name not in d.get("mcpServers", {}): print(f"  (not found: '{name}')"); sys.exit(1)
+del d["mcpServers"][name]
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  MCP server '{name}' removed")
+print(f"     Restart Claude Code to apply")
+EOF
+    ;;
+
+  show)
+    [ -z "$2" ] && { echo "Usage: mcp show <name>"; exit 1; }
+    python3 - "$MCP_CONFIG" "$2" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+name = sys.argv[2]
+cfg = d.get("mcpServers", {}).get(name)
+if not cfg: print(f"  (not found: '{name}')"); sys.exit(1)
+print(f"\n  \033[1m{name}\033[0m")
+print(f"  command  {cfg.get('command','')}")
+if cfg.get("args"): print(f"  args     {' '.join(cfg['args'])}")
+if cfg.get("env"):
+    for k, v in cfg["env"].items():
+        print(f"  env      {k}={v}")
+print("")
+EOF
+    ;;
+
+  status)
+    python3 - "$MCP_CONFIG" <<'PYEOF'
+import json, sys, subprocess, shutil
+with open(sys.argv[1]) as f: d = json.load(f)
+servers = d.get("mcpServers", {})
+if not servers:
+    print("  (no MCP servers configured)")
+    sys.exit(0)
+print(f"\n  MCP Server Status\n")
+for name, cfg in servers.items():
+    command = cfg.get("command", "")
+    found = shutil.which(command) is not None
+    if found:
+        print(f"  \033[32m✓\033[0m  {name:<20} {command} found")
+    else:
+        print(f"  \033[31m✗\033[0m  {name:<20} {command} NOT FOUND — install it")
+print("")
+PYEOF
+    ;;
+
+  *)
+    echo "Usage: mcp list|add|del|show|status [args]"
+    exit 1
+    ;;
+esac

@@ -141,3 +141,5 @@ Add this computer's protected paths below (customize per installation):
 | `snapshot` | Archive current state |
 | `secret list/get` | Safe access to ~/keys/ |
 | `plan show/set/add/done` | Session work plan |
+| `agent list/add/ping` | Agent registry with live status |
+| `mcp list/add/status` | MCP server management |

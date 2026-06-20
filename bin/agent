@@ -1,0 +1,120 @@
+#!/bin/bash
+# agent — registry of agents running on this computer
+# Usage: agent list
+#        agent add <name> "description" [--check "cmd"] [--inbox "path"]
+#        agent show <name>
+#        agent del <name>
+#        agent ping <name>     — run the check command and report alive/dead
+
+STORE="$HOME/system/agents.json"
+[ -f "$STORE" ] || echo '{"agents":{}}' > "$STORE"
+
+cmd="${1:-list}"
+
+case "$cmd" in
+  list)
+    python3 - "$STORE" <<'EOF'
+import json, sys, subprocess
+with open(sys.argv[1]) as f: d = json.load(f)
+agents = d.get("agents", {})
+if not agents:
+    print("  (no agents registered)")
+    print("  Register one: agent add <name> \"description\"")
+    sys.exit(0)
+print("")
+print("  Registered agents:")
+print("  ──────────────────────────────────────────")
+for name, info in agents.items():
+    check = info.get("check", "")
+    status = ""
+    if check:
+        r = subprocess.run(check, shell=True, capture_output=True)
+        status = "\033[32m● alive\033[0m" if r.returncode == 0 else "\033[31m○ dead\033[0m"
+    else:
+        status = "\033[33m? no check\033[0m"
+    print(f"  {status}  \033[1m{name}\033[0m — {info.get('desc','(no description)')}")
+    if info.get("inbox"):
+        print(f"           inbox: {info['inbox']}")
+print("")
+EOF
+    ;;
+
+  add)
+    [ -z "$2" ] && { echo "Usage: agent add <name> \"description\" [--check \"cmd\"] [--inbox \"path\"]"; exit 1; }
+    name="$2"; desc="${3:-}"; check=""; inbox_path=""
+    shift 3 2>/dev/null || shift $#
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --check) check="$2"; shift 2 ;;
+        --inbox) inbox_path="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    python3 - "$STORE" "$name" "$desc" "$check" "$inbox_path" <<'EOF'
+import json, sys
+from datetime import datetime, timezone
+store, name, desc, check, inbox = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+with open(store) as f: d = json.load(f)
+d["agents"][name] = {
+    "desc": desc,
+    "check": check,
+    "inbox": inbox,
+    "added": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+}
+with open(store, "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Agent '{name}' registered")
+EOF
+    ;;
+
+  show)
+    [ -z "$2" ] && { echo "Usage: agent show <name>"; exit 1; }
+    python3 - "$STORE" "$2" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+name = sys.argv[2]
+info = d.get("agents", {}).get(name)
+if not info: print(f"  (agent '{name}' not found)"); sys.exit(1)
+print(f"\n  \033[1m{name}\033[0m")
+for k, v in info.items():
+    if v: print(f"  {k:<10} {v}")
+print("")
+EOF
+    ;;
+
+  ping)
+    [ -z "$2" ] && { echo "Usage: agent ping <name>"; exit 1; }
+    python3 - "$STORE" "$2" <<'PYEOF'
+import json, sys, subprocess
+with open(sys.argv[1]) as f: d = json.load(f)
+name = sys.argv[2]
+info = d.get("agents", {}).get(name)
+if not info: print(f"  (agent '{name}' not found)"); sys.exit(1)
+check = info.get("check", "")
+if not check: print(f"  No check command registered for '{name}'"); sys.exit(1)
+r = subprocess.run(check, shell=True, capture_output=True)
+if r.returncode == 0:
+    print(f"  \033[32m● {name} is alive\033[0m")
+else:
+    print(f"  \033[31m○ {name} is dead\033[0m")
+    sys.exit(1)
+PYEOF
+    ;;
+
+  del|delete|rm)
+    [ -z "$2" ] && { echo "Usage: agent del <name>"; exit 1; }
+    python3 - "$STORE" "$2" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+name = sys.argv[2]
+if name not in d.get("agents", {}): print(f"  (not found: '{name}')"); sys.exit(1)
+del d["agents"][name]
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Agent '{name}' removed")
+EOF
+    ;;
+
+  *)
+    echo "Usage: agent list|add|show|ping|del <name> [args]"
+    exit 1
+    ;;
+esac

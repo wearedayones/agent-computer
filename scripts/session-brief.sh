@@ -48,6 +48,10 @@ MODIFIED=$(find "$HOME" -newer "$SESSION_FILE" -type f \
     ! -path "*/.npm/*" \
     ! -path "*/.bybit/*" \
     ! -path "*/.hermes/*" \
+    ! -path "*/.gemini/*" \
+    ! -path "*/system/memory.json" \
+    ! -path "*/system/tasks.json" \
+    ! -path "*/system/budget.json" \
     ! -name "*.log" \
     ! -name "*.jsonl" \
     ! -name "*.pyc" \
