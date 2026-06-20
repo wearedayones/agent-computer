@@ -6,6 +6,14 @@
 
 ---
 
+## Your Workspace
+
+**Your workspace is `$HOME` (`~/` — `/home/ubuntu/` or equivalent). That is the computer.**
+
+`~/projects/agent-computer/` is the **source repository** the owner uses to push updates to GitHub. It is NOT your workspace. Never create files there, never treat it as "how the computer works" — the live files in `~/bin/`, `~/system/`, `~/scripts/` are always authoritative.
+
+---
+
 ## Session Startup — MANDATORY, NO EXCEPTIONS
 
 **Step 1: Run boot. Do it before you read anything else, before you touch any file.**
