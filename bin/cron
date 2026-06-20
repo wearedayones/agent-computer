@@ -1,0 +1,83 @@
+#!/bin/bash
+# cron — manage cron jobs cleanly
+# Usage: cron list
+#        cron add "<schedule>" "<command>"   e.g. cron add "0 6 * * *" "bash ~/scripts/foo.sh"
+#        cron del <n>                        remove job number n (from cron list)
+#        cron show <n>                       show full command for job n
+
+get_jobs() {
+  crontab -l 2>/dev/null | grep -v "^#" | grep -v "^[[:space:]]*$"
+}
+
+cmd="${1:-list}"
+
+case "$cmd" in
+  list)
+    jobs=$(get_jobs)
+    if [ -z "$jobs" ]; then
+      echo "  (no cron jobs active)"
+      echo "  Add one: cron add \"* * * * *\" \"command\""
+      exit 0
+    fi
+    echo ""
+    n=1
+    while IFS= read -r line; do
+      schedule=$(echo "$line" | awk '{print $1,$2,$3,$4,$5}')
+      rest=$(echo "$line" | cut -d' ' -f6-)
+      # Shorten long commands for display
+      short=$(echo "$rest" | head -c 60)
+      [ ${#rest} -gt 60 ] && short="${short}…"
+      printf "  \033[36m%2d\033[0m  %-20s %s\n" "$n" "$schedule" "$short"
+      n=$((n+1))
+    done <<< "$jobs"
+    echo ""
+    ;;
+
+  add)
+    [ -z "$2" ] && { echo "Usage: cron add \"<schedule>\" \"<command>\""; exit 1; }
+    [ -z "$3" ] && { echo "Usage: cron add \"<schedule>\" \"<command>\""; exit 1; }
+    schedule="$2"; command="$3"
+    current=$(crontab -l 2>/dev/null || echo "")
+    # Check for duplicate
+    if echo "$current" | grep -qF "$command"; then
+      echo "  (already in crontab — not added again)"
+      exit 0
+    fi
+    printf "%s\n%s %s\n" "$current" "$schedule" "$command" | crontab -
+    echo "  ✓  Added: $schedule $command"
+    ;;
+
+  del|delete|rm)
+    [ -z "$2" ] && { echo "Usage: cron del <job-number>"; exit 1; }
+    n="$2"
+    jobs=$(get_jobs)
+    [ -z "$jobs" ] && { echo "  (no cron jobs to delete)"; exit 0; }
+    total=$(echo "$jobs" | wc -l)
+    if ! [[ "$n" =~ ^[0-9]+$ ]] || [ "$n" -lt 1 ] || [ "$n" -gt "$total" ]; then
+      echo "  Job #$n not found — run 'cron list' to see job numbers"
+      exit 1
+    fi
+    target=$(echo "$jobs" | sed -n "${n}p")
+    # Rebuild crontab without that line
+    current=$(crontab -l 2>/dev/null || echo "")
+    echo "$current" | grep -vF "$target" | crontab -
+    echo "  ✓  Removed job #$n: $(echo "$target" | head -c 80)"
+    ;;
+
+  show)
+    [ -z "$2" ] && { echo "Usage: cron show <job-number>"; exit 1; }
+    n="$2"
+    jobs=$(get_jobs)
+    line=$(echo "$jobs" | sed -n "${n}p")
+    [ -z "$line" ] && { echo "  Job #$n not found"; exit 1; }
+    echo ""
+    echo "  Job #$n:"
+    echo "  $line"
+    echo ""
+    ;;
+
+  *)
+    echo "Usage: cron list|add|del|show [args]"
+    exit 1
+    ;;
+esac

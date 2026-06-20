@@ -1,0 +1,78 @@
+#!/bin/bash
+# msg — send a message to a specific agent's inbox
+# Usage: msg <agent-name> "message"
+#        msg list                — show registered agents and their inboxes
+#
+# Each registered agent has an 'inbox' path in ~/system/agents.json.
+# Falls back to ~/inbox/<agent>/ if no inbox configured.
+
+AGENTS_STORE="$HOME/system/agents.json"
+SHARED_INBOX="$HOME/inbox"
+
+[ -f "$AGENTS_STORE" ] || echo '{"agents":{}}' > "$AGENTS_STORE"
+
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+TODAY=$(date -u +%Y-%m-%d)
+
+cmd="${1:-list}"
+
+case "$cmd" in
+  list)
+    python3 - "$AGENTS_STORE" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+agents = d.get("agents", {})
+if not agents:
+    print("  (no agents registered — use 'agent add' first)")
+    sys.exit(0)
+print("\n  Agents you can message:\n")
+for name, info in agents.items():
+    inbox = info.get("inbox") or f"~/inbox/{name}/"
+    print(f"  msg {name:<16} → {inbox}")
+print("")
+EOF
+    ;;
+
+  *)
+    # msg <name> "text"
+    name="$1"; shift; text="$*"
+    [ -z "$name" ] && { echo "Usage: msg <agent-name> \"message\""; exit 1; }
+    [ -z "$text" ] && { echo "Usage: msg <agent-name> \"message\""; exit 1; }
+
+    # Resolve inbox path from registry
+    INBOX_PATH=$(python3 - "$AGENTS_STORE" "$name" <<'EOF'
+import json, sys, os
+with open(sys.argv[1]) as f: d = json.load(f)
+info = d.get("agents", {}).get(sys.argv[2])
+if not info:
+    print("")
+    sys.exit(0)
+inbox = info.get("inbox", "")
+if inbox:
+    print(os.path.expanduser(inbox).rstrip("/"))
+else:
+    print("")
+EOF
+)
+
+    # Fall back to ~/inbox/<name>/
+    if [ -z "$INBOX_PATH" ]; then
+      INBOX_PATH="$SHARED_INBOX/$name"
+      echo "  (no inbox registered for '$name' — using $INBOX_PATH/)"
+    fi
+
+    mkdir -p "$INBOX_PATH"
+    MSG_FILE="$INBOX_PATH/msg-${TODAY}-$(date -u +%H%M%S).md"
+
+    cat > "$MSG_FILE" <<EOF
+# Message for $name
+**From:** $(whoami) / Claude Code
+**Sent:** $NOW
+
+$text
+EOF
+
+    echo "  ✓  Message sent to $name"
+    echo "     → $MSG_FILE"
+    ;;
+esac

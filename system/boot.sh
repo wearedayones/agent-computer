@@ -44,11 +44,15 @@ echo "  Last sync: $LAST_SYNC_TS"
 
 # ── Inbox ─────────────────────────────────────────────────────────────────────
 if [ "$INBOX" -gt 0 ]; then
-  echo -e "\n${YELLOW}── Inbox ($INBOX message(s))${NC}"
+  echo -e "\n${YELLOW}── Inbox ($INBOX message(s)) — read with: cat ~/inbox/<file>${NC}"
   for f in "$HOME/inbox/"*.md; do
     [ -f "$f" ] || continue
-    echo "  $(basename "$f"):"
-    sed 's/^/    /' "$f"
+    name=$(basename "$f")
+    # One-line summary: first non-empty, non-header line
+    summary=$(grep -m1 "^[^#|*\-]" "$f" 2>/dev/null | head -c 120 || true)
+    [ -z "$summary" ] && summary=$(grep -m1 "^\-" "$f" 2>/dev/null | sed 's/^- //' | head -c 120 || true)
+    [ -z "$summary" ] && summary="(no summary)"
+    echo "  ${name}: ${summary}"
   done
 else
   echo "  Inbox:     empty"

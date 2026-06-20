@@ -143,3 +143,5 @@ Add this computer's protected paths below (customize per installation):
 | `plan show/set/add/done` | Session work plan |
 | `agent list/add/ping` | Agent registry with live status |
 | `mcp list/add/status` | MCP server management |
+| `cron list/add/del` | Manage cron jobs by number |
+| `msg <agent> "text"` | Message a specific agent's inbox |

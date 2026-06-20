@@ -59,6 +59,11 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 | `mcp add <name> <cmd> [args]` | Register an MCP server |
 | `mcp del <name>` | Remove an MCP server |
 | `mcp status` | Check which MCP commands are installed |
+| `cron list` | Show all cron jobs with numbers |
+| `cron add "<schedule>" "<cmd>"` | Add a cron job |
+| `cron del <n>` | Remove cron job number n |
+| `msg <agent> "text"` | Send a message to a specific agent's inbox |
+| `msg list` | Show registered agents and their inboxes |
 
 ---
 
