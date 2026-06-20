@@ -1,0 +1,74 @@
+#!/bin/bash
+# snapshot — archive current agent state to ~/archive/
+# Usage: snapshot              — create snapshot now
+#        snapshot list         — list saved snapshots
+#        snapshot restore <n>  — restore memory/tasks/budget from snapshot
+
+ARCHIVE="$HOME/archive"
+SYSTEM="$HOME/system"
+SNAP_PREFIX="snapshot-"
+
+case "${1:-create}" in
+  list)
+    snaps=$(ls -d "$ARCHIVE/$SNAP_PREFIX"* 2>/dev/null | sort -r)
+    if [ -z "$snaps" ]; then
+      echo "  (no snapshots)"; exit 0
+    fi
+    echo ""
+    echo "  Snapshots:"
+    echo "  ──────────────────────────────────────────"
+    while IFS= read -r s; do
+      name=$(basename "$s")
+      manifest="$s/manifest.txt"
+      note=""
+      [ -f "$manifest" ] && note=$(grep "^Note:" "$manifest" | sed 's/^Note: //')
+      label="${name#$SNAP_PREFIX}"
+      echo "  $label  $note"
+    done <<< "$snaps"
+    echo ""
+    ;;
+
+  restore)
+    [ -z "$2" ] && { echo "Usage: snapshot restore <name>"; exit 1; }
+    target=$(ls -d "$ARCHIVE/${SNAP_PREFIX}"*"$2"* 2>/dev/null | head -1)
+    [ -z "$target" ] && { echo "  No snapshot matching '$2'"; exit 1; }
+    echo "  Restoring from $(basename "$target")..."
+    [ -f "$target/memory.json" ] && cp "$target/memory.json" "$SYSTEM/memory.json" && echo "  ✓  memory.json restored"
+    [ -f "$target/tasks.json"  ] && cp "$target/tasks.json"  "$SYSTEM/tasks.json"  && echo "  ✓  tasks.json restored"
+    [ -f "$target/budget.json" ] && cp "$target/budget.json" "$SYSTEM/budget.json" && echo "  ✓  budget.json restored"
+    echo "  Done."
+    ;;
+
+  create|"")
+    NOTE="${2:-}"
+    SNAP_DIR="$ARCHIVE/$SNAP_PREFIX$(date -u +%Y-%m-%d-%H%M%S)"
+    mkdir -p "$SNAP_DIR"
+
+    [ -f "$SYSTEM/memory.json" ] && cp "$SYSTEM/memory.json" "$SNAP_DIR/" && echo "  ✓  memory.json"
+    [ -f "$SYSTEM/tasks.json"  ] && cp "$SYSTEM/tasks.json"  "$SNAP_DIR/" && echo "  ✓  tasks.json"
+    [ -f "$SYSTEM/budget.json" ] && cp "$SYSTEM/budget.json" "$SNAP_DIR/" && echo "  ✓  budget.json"
+
+    crontab -l 2>/dev/null > "$SNAP_DIR/crontab.txt" && echo "  ✓  crontab.txt"
+
+    DISK=$(df -h "$HOME" | awk 'NR==2{print $3"/"$2,"("$5")"}')
+    cat > "$SNAP_DIR/manifest.txt" <<EOF
+Snapshot: $(basename "$SNAP_DIR")
+Created:  $(date -u '+%Y-%m-%d %H:%M UTC')
+Disk:     $DISK
+Note:     ${NOTE:-(none)}
+EOF
+    echo "  ✓  manifest.txt"
+    echo ""
+    echo "  Snapshot saved: ~/archive/$(basename "$SNAP_DIR")"
+
+    # Keep only last 10 snapshots
+    ls -dt "$ARCHIVE/$SNAP_PREFIX"* 2>/dev/null | tail -n +11 | while read -r old; do
+      rm -rf "$old"
+    done
+    ;;
+
+  *)
+    echo "Usage: snapshot [create [note] | list | restore <name>]"
+    exit 1
+    ;;
+esac

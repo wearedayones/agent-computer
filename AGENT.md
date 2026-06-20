@@ -40,6 +40,17 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 | `log today` | Show today's activity from changelog |
 | `log week` | Show last 7 days of activity |
 | `log errors` | Show error/failure entries |
+| `snapshot` | Archive memory/tasks/budget/cron to ~/archive/ |
+| `snapshot list` | List saved snapshots |
+| `snapshot restore <name>` | Restore state from a snapshot |
+| `secret list` | List key names in ~/keys/ (never values) |
+| `secret get <name>` | Read a key from ~/keys/ |
+| `secret set <name>` | Write a key (prompts securely) |
+| `plan show` | Display active session plan |
+| `plan set "title"` | Start a new plan |
+| `plan add "step"` | Add a step to current plan |
+| `plan done "step"` | Mark a step complete |
+| `plan clear` | Remove active plan |
 
 ---
 

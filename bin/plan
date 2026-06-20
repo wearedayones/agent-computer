@@ -1,0 +1,76 @@
+#!/bin/bash
+# plan — current session work plan
+# Usage: plan show              — display active plan
+#        plan set "title"       — start a new plan (opens editor or takes stdin)
+#        plan add "step"        — append a step to current plan
+#        plan done "step"       — mark a step complete (strikethrough)
+#        plan clear             — remove plan
+
+PLAN_FILE="$HOME/system/plan.md"
+
+cmd="${1:-show}"
+
+case "$cmd" in
+  show)
+    if [ ! -f "$PLAN_FILE" ]; then
+      echo "  (no active plan — use: plan set \"title\")"
+      exit 0
+    fi
+    echo ""
+    cat "$PLAN_FILE" | sed 's/^/  /'
+    echo ""
+    ;;
+
+  set)
+    shift; title="${*:-Session Plan}"
+    cat > "$PLAN_FILE" <<EOF
+# Plan: $title
+
+> Created: $(date -u '+%Y-%m-%d %H:%M UTC')
+
+## Steps
+
+- [ ] (add steps with: plan add "step")
+EOF
+    echo "  ✓  Plan created: $title"
+    echo "  Add steps: plan add \"description\""
+    ;;
+
+  add)
+    shift; step="$*"
+    [ -z "$step" ] && { echo "Usage: plan add \"step description\""; exit 1; }
+    if [ ! -f "$PLAN_FILE" ]; then
+      echo "  No active plan — create one first: plan set \"title\""; exit 1
+    fi
+    echo "- [ ] $step" >> "$PLAN_FILE"
+    echo "  ✓  Step added"
+    ;;
+
+  done)
+    shift; step="$*"
+    [ -z "$step" ] && { echo "Usage: plan done \"step description\""; exit 1; }
+    if [ ! -f "$PLAN_FILE" ]; then
+      echo "  No active plan"; exit 1
+    fi
+    if grep -qF "[ ] $step" "$PLAN_FILE"; then
+      sed -i "s/\[ \] $(echo "$step" | sed 's/[[\.*^$()+?{}|]/\\&/g')/[x] $step/" "$PLAN_FILE"
+      echo "  ✓  Marked done: $step"
+    else
+      echo "  (step not found — check: plan show)"
+      exit 1
+    fi
+    ;;
+
+  clear)
+    if [ ! -f "$PLAN_FILE" ]; then
+      echo "  (no active plan)"; exit 0
+    fi
+    rm "$PLAN_FILE"
+    echo "  ✓  Plan cleared"
+    ;;
+
+  *)
+    echo "Usage: plan show|set|add|done|clear [args]"
+    exit 1
+    ;;
+esac

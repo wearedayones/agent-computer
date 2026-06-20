@@ -138,3 +138,6 @@ Add this computer's protected paths below (customize per installation):
 | `task add/list/done/del` | Work queue surviving context resets |
 | `budget log/show` | Cost and spend tracking |
 | `log today/week/errors` | Activity viewer |
+| `snapshot` | Archive current state |
+| `secret list/get` | Safe access to ~/keys/ |
+| `plan show/set/add/done` | Session work plan |
