@@ -1,0 +1,69 @@
+#!/bin/bash
+# budget — cost and spend tracking ledger
+# Usage: budget log <amount> "description"
+#        budget show [month YYYY-MM]
+#        budget reset
+
+STORE="$HOME/system/budget.json"
+[ -f "$STORE" ] || echo '{"entries":[]}' > "$STORE"
+
+cmd="${1:-show}"
+
+case "$cmd" in
+  log)
+    [ -z "$2" ] && { echo "Usage: budget log <amount> <description>"; exit 1; }
+    amount="$2"; shift 2; desc="${*:-unspecified}"
+    python3 - "$STORE" "$amount" "$desc" <<'EOF'
+import json, sys
+from datetime import datetime, timezone
+store, amount, desc = sys.argv[1], sys.argv[2], sys.argv[3]
+try: amt = float(amount)
+except ValueError: print(f"  Invalid amount: {amount}"); sys.exit(1)
+with open(store) as f: d = json.load(f)
+d["entries"].append({
+    "amount": amt,
+    "desc": desc,
+    "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "month": datetime.now(timezone.utc).strftime("%Y-%m"),
+})
+with open(store, "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Logged ${amt:.4f} — {desc}")
+EOF
+    ;;
+  show)
+    month="${2:-}"
+    python3 - "$STORE" "$month" <<'EOF'
+import json, sys
+from datetime import datetime, timezone
+with open(sys.argv[1]) as f: d = json.load(f)
+filter_month = sys.argv[2] if sys.argv[2] else datetime.now(timezone.utc).strftime("%Y-%m")
+entries = [e for e in d["entries"] if e.get("month","") == filter_month]
+if not entries:
+    print(f"  No spend logged for {filter_month}"); sys.exit(0)
+total = sum(e["amount"] for e in entries)
+print(f"\n  \033[1mSpend — {filter_month}\033[0m\n")
+for e in entries:
+    ts = e["ts"][5:16].replace("T"," ")
+    print(f"  {ts}  \033[33m${e['amount']:<8.4f}\033[0m  {e['desc']}")
+print(f"\n  {'─'*40}")
+print(f"  \033[1mTotal: ${total:.4f}\033[0m\n")
+EOF
+    ;;
+  reset)
+    python3 - "$STORE" <<'EOF'
+import json, sys
+from datetime import datetime, timezone
+with open(sys.argv[1]) as f: d = json.load(f)
+month = datetime.now(timezone.utc).strftime("%Y-%m")
+before = len(d["entries"])
+d["entries"] = [e for e in d["entries"] if e.get("month","") != month]
+removed = before - len(d["entries"])
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Cleared {removed} entries for {month}")
+EOF
+    ;;
+  *)
+    echo "Usage: budget log|show|reset [args]"
+    exit 1
+    ;;
+esac

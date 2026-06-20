@@ -1,0 +1,89 @@
+#!/bin/bash
+# task — work queue surviving context resets
+# Usage: task add "description"
+#        task list
+#        task done <id>
+#        task del <id>
+#        task clear (removes all done tasks)
+
+STORE="$HOME/system/tasks.json"
+[ -f "$STORE" ] || echo '{"next_id":1,"tasks":[]}' > "$STORE"
+
+cmd="${1:-list}"
+
+case "$cmd" in
+  add)
+    shift; desc="$*"
+    [ -z "$desc" ] && { echo "Usage: task add <description>"; exit 1; }
+    python3 - "$STORE" "$desc" <<'EOF'
+import json, sys
+from datetime import datetime, timezone
+store, desc = sys.argv[1], sys.argv[2]
+with open(store) as f: d = json.load(f)
+tid = d["next_id"]
+d["tasks"].append({"id": tid, "desc": desc, "status": "open",
+                   "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+d["next_id"] += 1
+with open(store, "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Task #{tid} added")
+EOF
+    ;;
+  list)
+    python3 - "$STORE" "${2:-all}" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+filter_ = sys.argv[2]
+tasks = d["tasks"]
+if filter_ == "open":
+    tasks = [t for t in tasks if t["status"] == "open"]
+if not tasks:
+    print("  (no tasks)"); sys.exit(0)
+for t in tasks:
+    icon = "\033[32m✓\033[0m" if t["status"] == "done" else "\033[33m○\033[0m"
+    print(f"  {icon}  #{t['id']}  {t['desc']}")
+EOF
+    ;;
+  done)
+    [ -z "$2" ] && { echo "Usage: task done <id>"; exit 1; }
+    python3 - "$STORE" "$2" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+tid = int(sys.argv[2])
+found = False
+for t in d["tasks"]:
+    if t["id"] == tid:
+        t["status"] = "done"; found = True; break
+if not found: print(f"  Task #{tid} not found"); sys.exit(1)
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Task #{tid} marked done")
+EOF
+    ;;
+  del|delete|rm)
+    [ -z "$2" ] && { echo "Usage: task del <id>"; exit 1; }
+    python3 - "$STORE" "$2" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+tid = int(sys.argv[2])
+before = len(d["tasks"])
+d["tasks"] = [t for t in d["tasks"] if t["id"] != tid]
+if len(d["tasks"]) == before: print(f"  Task #{tid} not found"); sys.exit(1)
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  Task #{tid} deleted")
+EOF
+    ;;
+  clear)
+    python3 - "$STORE" <<'EOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+before = len(d["tasks"])
+d["tasks"] = [t for t in d["tasks"] if t["status"] != "done"]
+removed = before - len(d["tasks"])
+with open(sys.argv[1], "w") as f: json.dump(d, f, indent=2)
+print(f"  \033[32m✓\033[0m  {removed} done task(s) cleared")
+EOF
+    ;;
+  *)
+    echo "Usage: task add|list|done|del|clear [args]"
+    exit 1
+    ;;
+esac

@@ -25,6 +25,21 @@ After `boot`: check README.md alerts → fix anything broken → do your work �
 | `note "msg"` | Leave a message for the next agent in `~/inbox/` |
 | `export` | Package computer for migration (configs only) |
 | `export --include-secrets` | Full export including API keys and tokens |
+| `memory set <key> <value>` | Persist a fact across sessions |
+| `memory get <key>` | Recall a stored fact |
+| `memory list` | List all stored memories |
+| `memory del <key>` | Delete a stored memory |
+| `task add "desc"` | Add a task to the work queue |
+| `task list` | Show all tasks (open + done) |
+| `task done <id>` | Mark a task complete |
+| `task del <id>` | Remove a task |
+| `task clear` | Remove all completed tasks |
+| `budget log <amount> "desc"` | Record a cost or spend entry |
+| `budget show [YYYY-MM]` | Show spend for current (or given) month |
+| `budget reset` | Clear spend entries for current month |
+| `log today` | Show today's activity from changelog |
+| `log week` | Show last 7 days of activity |
+| `log errors` | Show error/failure entries |
 
 ---
 
@@ -309,6 +324,9 @@ tar -xzf vps-export-*.tar.gz && cd vps-export-* && bash restore.sh
 | `.version` | Installed agent-computer version |
 | `.update-source` | GitHub repo URL for auto-updates |
 | `.installed` | Installation details and timestamp |
+| `memory.json` | Persistent cross-session knowledge store |
+| `tasks.json` | Work queue surviving context resets |
+| `budget.json` | Cost and spend ledger |
 
 ---
 
