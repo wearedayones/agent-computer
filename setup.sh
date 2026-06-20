@@ -207,6 +207,16 @@ done
 [ "$LINKED" -gt 0 ] && ok "$LINKED commands linked to /usr/local/bin" \
   || warn "Could not link to /usr/local/bin (no sudo) — commands work in login shells only"
 
+# / root — machine-level discovery (any agent on this computer, any user)
+ROOT_LINKED=0
+for doc in AGENT.md CLAUDE.md README.md; do
+  if sudo ln -sf "$HOME_DIR/$doc" "/$doc" 2>/dev/null; then
+    ROOT_LINKED=$((ROOT_LINKED + 1))
+  fi
+done
+[ "$ROOT_LINKED" -gt 0 ] && ok "AGENT.md, CLAUDE.md, README.md linked to / (machine-level)" \
+  || warn "Could not link docs to / (no sudo) — discoverable at ~/AGENT.md only"
+
 # ── Phase 5: Claude Code integration ─────────────────────────────────────────
 phase "Configuring Claude Code integration..."
 

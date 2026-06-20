@@ -68,6 +68,11 @@ for cmd in "$HOME_DIR/bin/"*; do
   sudo ln -sf "$cmd" "/usr/local/bin/$(basename "$cmd")" 2>/dev/null || true
 done
 
+# Re-symlink machine-level docs to / so any agent on this computer finds them
+for doc in AGENT.md CLAUDE.md README.md; do
+  sudo ln -sf "$HOME_DIR/$doc" "/$doc" 2>/dev/null || true
+done
+
 echo "$REMOTE_VERSION" > "$VERSION_FILE"
 log "Updated to v$REMOTE_VERSION successfully"
 
