@@ -138,28 +138,42 @@ def find_all_metrics(apps_dir, filter_app):
                 results.append(os.path.join(dirpath, "metrics.jsonl"))
     return results
 
-entries = []
+def extract_value(e, field):
+    """Extract a numeric value from an entry — handles flat scalars and videos-array schema."""
+    if field in e:
+        try: return float(e[field])
+        except (TypeError, ValueError): return None
+    # videos-array schema: sum field across all videos in this day's entry
+    if "videos" in e and isinstance(e["videos"], list):
+        total = sum(float(v.get(field, 0) or 0) for v in e["videos"] if field in v)
+        if any(field in v for v in e["videos"]):
+            return total
+    return None
+
+# Build daily aggregation: date -> total value (summing across all matching files)
+daily = {}
 for mf in find_all_metrics(apps_dir, filter_app):
     try:
         for line in open(mf):
             line = line.strip()
             if not line: continue
             e = json.loads(line)
-            if e.get("ts","") >= cutoff and field in e:
-                entries.append(e)
+            # Support both ts-keyed and date-keyed entries
+            date = e.get("date") or e.get("ts","")[:10]
+            if date < cutoff[:10]: continue
+            val = extract_value(e, field)
+            if val is not None:
+                daily[date] = daily.get(date, 0) + val
     except: pass
 
-entries.sort(key=lambda e: e.get("ts",""))
-if not entries:
+if not daily:
     print(f"  No data for field '{field}' in the last {days} days"); sys.exit(0)
 
 print(f"\n  {BOLD}Trend: {field} (last {days} days){NC}\n")
 print(f"  {'Date':<12}  {'Value'}")
 print(f"  {'─'*40}")
-for e in entries[-20:]:
-    ts = e.get("ts","")[:10]
-    val = e.get(field,"?")
-    print(f"  {ts}  {YELLOW}{val}{NC}")
+for date in sorted(daily)[-20:]:
+    print(f"  {date}  {YELLOW}{daily[date]:.0f}{NC}")
 print("")
 EOF
     ;;
@@ -183,6 +197,16 @@ apps_dir, field, days_str = sys.argv[1:4]
 days = int(days_str)
 BOLD, YELLOW, NC = "\033[1m", "\033[1;33m", "\033[0m"
 cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def entry_value(e, field):
+    if field in e:
+        try: return float(e[field])
+        except (TypeError, ValueError): return None
+    if "videos" in e and isinstance(e["videos"], list):
+        total = sum(float(v.get(field, 0) or 0) for v in e["videos"] if field in v)
+        if any(field in v for v in e["videos"]):
+            return total
+    return None
+
 app_totals = {}
 for app in os.listdir(apps_dir):
     app_dir = os.path.join(apps_dir, app)
@@ -190,16 +214,20 @@ for app in os.listdir(apps_dir):
     for dirpath, dirs, files in os.walk(app_dir):
         dirs[:] = [d for d in dirs if d not in ('__pycache__', '.git', 'node_modules')]
         if "metrics.jsonl" not in files: continue
+        # Derive a channel label: use the directory immediately above 'state/', else app name
+        parent = os.path.basename(os.path.dirname(dirpath)) if os.path.basename(dirpath) == "state" else os.path.basename(dirpath)
+        key = f"{app}/{parent}" if parent != app else app
         mf = os.path.join(dirpath, "metrics.jsonl")
         try:
             for line in open(mf):
                 line = line.strip()
                 if not line: continue
                 e = json.loads(line)
-                if e.get("ts","") >= cutoff and field in e:
-                    key = f"{app}"
-                    try: app_totals[key] = app_totals.get(key, 0) + float(e[field])
-                    except: pass
+                date = e.get("date") or e.get("ts","")[:10]
+                if date < cutoff[:10]: continue
+                val = entry_value(e, field)
+                if val is not None:
+                    app_totals[key] = app_totals.get(key, 0) + val
         except: pass
 if not app_totals:
     print(f"  No data for field '{field}' in the last {days} days"); sys.exit(0)
