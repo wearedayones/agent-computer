@@ -15,6 +15,9 @@ except ImportError:
 
 HOME = Path.home()
 _write_lock = threading.Lock()
+_cache = {}
+_cache_ts = 0.0
+_CACHE_TTL = 10.0
 
 # ── Data collectors ───────────────────────────────────────────────────────────
 
@@ -57,14 +60,13 @@ def budget_data():
     return {"month": month, "total": round(sum(by_cat.values()), 4),
             "by_category": by_cat, "thresholds": d.get("thresholds", {})}
 
-def trace_data(limit=20):
+def trace_data(limit=25):
     try:
         lines = (HOME / "system/trace.jsonl").read_text().strip().splitlines()
         return [json.loads(l) for l in lines if l.strip()][-limit:]
     except: return []
 
 def _find_app_dirs(base, depth=3):
-    """Recursively find dirs with a state/ subdir, skipping envs and hidden dirs."""
     result = []
     if depth <= 0: return result
     try:
@@ -119,7 +121,9 @@ def activity_feed():
             e = json.loads(l)
             ok = e.get("outcome") == "success"
             events.append({"type":"trace","ts":e.get("ts",""),"text":e.get("action",""),
-                           "icon":"✓" if ok else "✗","color":"#22c55e" if ok else "#ef4444"})
+                           "agent":e.get("agent","agent"),
+                           "icon":"✓" if ok else "✗","color":"#00d08a" if ok else "#ff4466",
+                           "outcome": e.get("outcome","")})
     except: pass
     inbox = HOME / "inbox"
     if inbox.exists():
@@ -129,7 +133,7 @@ def activity_feed():
                 text = f.read_text().strip()
                 first = text.splitlines()[0][:80] if text else ""
                 ts = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                events.append({"type":"note","ts":ts,"text":first,"icon":"📧","color":"#eab308"})
+                events.append({"type":"note","ts":ts,"text":first,"agent":"inbox","icon":"📧","color":"#ffa040","outcome":""})
             except: pass
     apps_dir = HOME / "apps"
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M")
@@ -142,8 +146,8 @@ def activity_feed():
                     if any(w in line.upper() for w in ("ERROR","FAIL","CRITICAL")):
                         ts_str = line[:16] if len(line) >= 16 else ""
                         if ts_str >= cutoff[:16]:
-                            events.append({"type":"alert","ts":ts_str+"Z","text":f"{app}: {line.strip()[:80]}",
-                                           "icon":"⚠","color":"#ef4444"})
+                            events.append({"type":"alert","ts":ts_str+"Z","text":f"{line.strip()[:80]}",
+                                           "agent":app,"icon":"⚠","color":"#ff4466","outcome":"fail"})
             except: pass
     events.sort(key=lambda e: e["ts"], reverse=True)
     return events[:20]
@@ -176,7 +180,7 @@ def agents_data():
             alive = None
             if chk:
                 try:
-                    r = subprocess.run(chk, shell=True, capture_output=True, timeout=4)
+                    r = subprocess.run(chk, shell=True, capture_output=True, timeout=2)
                     alive = r.returncode == 0
                 except: alive = False
             result[name] = {"alive": alive, "url": info.get("url",""), "check": chk}
@@ -229,9 +233,19 @@ def sched_data():
     except: return []
 
 def build_state():
+    global _cache, _cache_ts
+    now = time.monotonic()
+    if now - _cache_ts >= _CACHE_TTL:
+        _cache = {
+            "agents":   agents_data(),
+            "cron":     cron_data(),
+            "ver":      version_info(),
+            "sessions": sessions_data(),
+        }
+        _cache_ts = now
     return {
         "ts":          datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "system":      {**version_info(), **disk_info(), "sessions": sessions_data()},
+        "system":      {**_cache["ver"], **disk_info(), "sessions": _cache["sessions"]},
         "env":         env_data(),
         "tasks":       tasks_data(),
         "budget":      budget_data(),
@@ -239,10 +253,10 @@ def build_state():
         "apps":        apps_data(),
         "activity":    activity_feed(),
         "log_sources": discover_logs(),
-        "agents":      agents_data(),
+        "agents":      _cache["agents"],
         "inbox":       inbox_data(),
         "alerts":      alerts_data(),
-        "cron":        cron_data(),
+        "cron":        _cache["cron"],
         "sched":       sched_data(),
     }
 
@@ -256,671 +270,898 @@ HTML = r"""<!DOCTYPE html>
 <title>Agent Computer</title>
 <style>
 :root{
-  --bg:#09090b;--surface:#111114;--surface2:#18181b;--border:#27272a;
-  --text:#e4e4e7;--muted:#71717a;--faint:#3f3f46;
-  --blue:#3b82f6;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--purple:#a855f7;
-  --blue-dim:#1d3557;--green-dim:#14532d;--red-dim:#450a0a;--yellow-dim:#422006;
-  --r:10px;--r-sm:6px;
+  --bg:#0d0d14;--sb:#0a0a12;--surf:#161622;--surf2:#1c1c2e;--surf3:#222238;
+  --bdr:#252535;--bdr2:#2e2e48;
+  --tx:#e8e8f0;--tx2:#8888aa;--tx3:#505070;
+  --blue:#4f9fff;--bdim:rgba(79,159,255,.13);
+  --green:#00d08a;--gdim:rgba(0,208,138,.13);
+  --red:#ff4466;--rdim:rgba(255,68,102,.13);
+  --yel:#ffa040;--ydim:rgba(255,160,64,.13);
+  --pur:#9b6dff;
+  --sbw:220px;--tbh:52px;--r:9px;--rsm:5px;
 }
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;min-height:100vh;padding-bottom:80px}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;display:flex}
 button{font-family:inherit;cursor:pointer;border:none;outline:none}
-a{color:var(--blue);text-decoration:none}
-a:hover{text-decoration:underline}
 
-/* ── Header ── */
-#hdr{
-  position:sticky;top:0;z-index:100;
-  background:rgba(9,9,11,.92);backdrop-filter:blur(12px);
-  border-bottom:1px solid var(--border);
-  padding:0 16px;height:54px;
-  display:flex;align-items:center;justify-content:space-between;gap:12px;
+/* ── SIDEBAR ── */
+#sidebar{
+  width:var(--sbw);flex-shrink:0;background:var(--sb);
+  border-right:1px solid var(--bdr);
+  display:flex;flex-direction:column;
+  position:fixed;left:0;top:0;bottom:0;z-index:50;
 }
-#hdr-left{display:flex;align-items:center;gap:10px}
-#hdr h1{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.3px}
-#hdr-right{display:flex;align-items:center;gap:8px}
-#ts{font-size:11px;color:var(--muted);white-space:nowrap}
-#disk-badge{font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px}
-#live-label{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--red)}
-.live-dot{width:7px;height:7px;border-radius:50%;background:var(--red);flex-shrink:0;animation:live-pulse 1.5s ease-in-out infinite}
-@keyframes live-pulse{0%,100%{box-shadow:0 0 0 2px rgba(239,68,68,.3)}50%{box-shadow:0 0 0 6px rgba(239,68,68,.05)}}
-
-/* ── Mission ── */
-#mission-bar{
-  background:linear-gradient(135deg,#1e1b4b,#162032);
-  border-bottom:1px solid #3730a3;
-  padding:10px 16px;font-size:13px;color:#a5b4fc;
-  display:none;align-items:center;gap:8px;
+.sb-logo{padding:14px 16px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:9px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex-shrink:0;animation:ldot 1.6s ease-in-out infinite}
+@keyframes ldot{0%,100%{box-shadow:0 0 0 2px rgba(255,68,102,.25)}50%{box-shadow:0 0 0 5px rgba(255,68,102,.05)}}
+.sb-logo-name{font-size:13px;font-weight:700;color:var(--tx);letter-spacing:-.3px;flex:1}
+.sb-ver{font-size:10px;color:var(--tx3);font-family:monospace}
+.sb-sec{padding:8px 0}
+.sb-lbl{font-size:10px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.1em;padding:5px 16px 3px}
+.nav-item{
+  display:flex;align-items:center;gap:9px;padding:8px 16px;
+  color:var(--tx2);font-size:13px;font-weight:500;
+  cursor:pointer;transition:all .12s;
+  border:none;background:none;width:100%;text-align:left;position:relative;
 }
+.nav-item:hover{color:var(--tx);background:rgba(255,255,255,.04)}
+.nav-item.active{color:var(--blue);background:var(--bdim)}
+.nav-item.active::before{content:'';position:absolute;left:0;top:5px;bottom:5px;width:3px;background:var(--blue);border-radius:0 3px 3px 0}
+.nav-icon{width:17px;text-align:center;flex-shrink:0;font-size:13px}
+.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:17px;height:17px;padding:0 4px;border-radius:9px;display:none;align-items:center;justify-content:center}
+.sb-actions{border-top:1px solid var(--bdr);padding:8px 0}
+.sb-act-btn{
+  display:flex;align-items:center;gap:9px;padding:7px 16px;
+  color:var(--tx2);font-size:12px;font-weight:500;
+  cursor:pointer;transition:all .12s;border:none;background:none;width:100%;text-align:left;
+}
+.sb-act-btn:hover{color:var(--tx);background:rgba(255,255,255,.04)}
+.sb-act-btn.act-open{color:var(--green);background:var(--gdim)}
+.sb-disk{margin-top:auto;padding:12px 16px;border-top:1px solid var(--bdr)}
+.sb-disk-row{display:flex;justify-content:space-between;font-size:11px;color:var(--tx2);margin-bottom:5px}
+.sb-disk-bar{height:3px;background:var(--surf3);border-radius:2px;overflow:hidden}
+.sb-disk-fill{height:3px;border-radius:2px;transition:width .5s}
 
-/* ── Layout ── */
-#main{padding:14px;display:flex;flex-direction:column;gap:12px;max-width:900px;margin:0 auto}
+/* ── PAGE ── */
+#page{margin-left:var(--sbw);flex:1;display:flex;flex-direction:column;height:100vh;overflow:hidden}
 
-/* ── Cards ── */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;animation:fadein .2s ease}
-.card-hdr{padding:12px 14px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
-.card-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
-.card-body{padding:12px 14px}
-.card-body.no-pad{padding:0}
+/* ── TOPBAR ── */
+#topbar{
+  height:var(--tbh);flex-shrink:0;
+  background:rgba(13,13,20,.92);border-bottom:1px solid var(--bdr);
+  backdrop-filter:blur(12px);
+  display:flex;align-items:center;padding:0 20px;gap:10px;
+}
+.tb-title{font-size:14px;font-weight:700;color:var(--tx);min-width:120px}
+.tb-mission{font-size:12px;color:#8888cc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tb-disk{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;flex-shrink:0}
+.tb-time{font-size:12px;color:var(--tx3);white-space:nowrap;font-family:monospace;flex-shrink:0}
 
-/* ── Stat grid ── */
-.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border)}
-.stat-cell{background:var(--surface);padding:12px 14px}
-.stat-label{font-size:11px;color:var(--muted);margin-bottom:3px}
-.stat-value{font-size:18px;font-weight:700;color:var(--text);line-height:1.2}
+/* ── MAIN ── */
+#main{flex:1;overflow-y:auto;padding:18px 20px}
+.section{display:none}
+.section.active{display:block}
+#s-logs.active{display:flex;flex-direction:column;height:100%}
 
-/* ── Disk arc ── */
-.disk-wrap{display:flex;align-items:center;gap:14px;padding:12px 14px}
-.disk-arc{position:relative;width:64px;height:64px;flex-shrink:0}
-.disk-arc svg{transform:rotate(-90deg)}
-.disk-arc-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
-.disk-detail{flex:1;min-width:0}
-.disk-bar-wrap{background:var(--faint);border-radius:4px;height:6px;margin:6px 0 4px;overflow:hidden}
-.disk-bar{height:6px;border-radius:4px;transition:width .6s cubic-bezier(.4,0,.2,1)}
-.sessions-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
-.session-chip{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:11px;color:var(--muted)}
+/* ── SECTION HEADER ── */
+.sec-hdr{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
+.sec-title{font-size:18px;font-weight:700;color:var(--tx)}
+.sec-sub{font-size:12px;color:var(--tx2)}
 
-/* ── Activity feed ── */
-.act-item{display:flex;align-items:flex-start;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);animation:fadein .25s ease}
-.act-item:last-child{border:none}
-.act-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;margin-top:1px}
-.act-body{flex:1;min-width:0}
-.act-text{font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.act-time{font-size:10px;color:var(--faint);margin-top:2px}
+/* ── NOW PLAYING hero ── */
+.hero{
+  background:linear-gradient(135deg,#0f0f22,#161630);
+  border:1px solid #2a2a4e;border-radius:var(--r);
+  padding:16px 20px;margin-bottom:16px;
+  position:relative;overflow:hidden;
+}
+.hero::after{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--blue),var(--pur),var(--green),var(--blue));
+  background-size:200% 100%;animation:hline 4s linear infinite;
+}
+@keyframes hline{0%{background-position:0% 0}100%{background-position:200% 0}}
+.hero-badge{position:absolute;top:12px;right:14px;font-size:9px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.12em;display:flex;align-items:center;gap:4px}
+.hero-idle{font-size:13px;color:var(--tx3);font-style:italic;padding:4px 0}
+.hero-beat{display:flex;align-items:center;gap:12px}
+.hero-char{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--tx2);min-width:130px;flex-shrink:0}
+.hero-icon{font-size:22px;flex-shrink:0;line-height:1}
+.hero-action{font-size:17px;font-weight:700;color:var(--tx);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hero-detail{font-size:12px;color:var(--tx2);margin-top:6px;padding-left:142px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hero-ts{font-size:11px;color:var(--tx3);margin-top:5px;padding-left:142px}
 
-/* ── Log viewer ── */
-#log-tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 10px;border-bottom:1px solid var(--border);background:var(--surface2)}
-.log-tab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--muted);padding:3px 8px;font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s}
-.log-tab:hover{color:var(--text)}
-.log-tab.active{color:#4ade80;border-bottom-color:#4ade80}
-#log-lines{background:#000;color:#4ade80;font-family:'SF Mono','Fira Code',ui-monospace,monospace;font-size:11px;line-height:1.6;padding:8px 10px;max-height:260px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-#log-empty{padding:20px;text-align:center;color:var(--muted);font-size:12px}
+/* ── LIVE STATS STRIP ── */
+.stats-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--bdr);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;margin-bottom:16px}
+.stat-cell{background:var(--surf);padding:11px 14px}
+.stat-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);margin-bottom:2px}
+.stat-val{font-size:20px;font-weight:800;color:var(--tx);line-height:1.1}
+.stat-sub{font-size:11px;color:var(--tx2);margin-top:1px}
 
-/* ── App cards (generic) ── */
-.ch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1px;background:var(--border)}
-.ch-card{background:var(--surface);padding:12px 14px}
-.ch-name{font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:6px}
-.ch-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.ch-progress{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.ch-prog-bar{flex:1;background:var(--faint);border-radius:3px;height:5px;overflow:hidden}
-.ch-prog-fill{height:5px;border-radius:3px;background:var(--blue);transition:width .5s}
-.ch-prog-text{font-size:11px;color:var(--muted);white-space:nowrap;min-width:36px;text-align:right}
-.ch-views{font-size:13px;font-weight:700;color:var(--text)}
-.ch-top{font-size:10px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kv-row{display:flex;justify-content:space-between;font-size:11px;margin-top:3px;gap:8px}
-.kv-k{color:var(--muted);flex-shrink:0}
-.kv-v{color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+/* ── LIVE GRID ── */
+.live-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 
-/* ── Tasks ── */
-.task-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border)}
-.task-item:last-child{border:none}
-.task-pri{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;flex-shrink:0;text-transform:uppercase}
-.pri-high{background:rgba(239,68,68,.15);color:#fca5a5}
-.pri-medium{background:rgba(59,130,246,.15);color:#93c5fd}
-.pri-low{background:var(--faint);color:var(--muted)}
-.task-desc{flex:1;font-size:13px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.task-id{font-size:11px;color:var(--faint);flex-shrink:0}
-.task-done-btn{flex-shrink:0;background:transparent;border:1px solid var(--faint);color:var(--muted);font-size:11px;padding:3px 8px;border-radius:5px;transition:all .15s}
-.task-done-btn:hover{background:var(--green-dim);border-color:var(--green);color:var(--green)}
-.task-empty{padding:14px;text-align:center;color:var(--muted);font-size:13px}
+/* ── SCENE FEED ── */
+.card{background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden}
+.card-hdr{padding:9px 14px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:7px}
+.card-ttl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--tx3);flex:1}
+.card-sub{font-size:10px;color:var(--tx3)}
+.scene-feed{max-height:320px;overflow-y:auto}
+.scene-item{display:flex;align-items:flex-start;gap:0;padding:8px 14px;border-bottom:1px solid var(--bdr);transition:background .1s}
+.scene-item:last-child{border:none}
+.scene-item:hover{background:var(--surf2)}
+.scene-item.is-new{animation:slide-in .3s ease}
+@keyframes slide-in{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+.scene-char{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx2);min-width:90px;flex-shrink:0;padding-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scene-sep{color:var(--tx3);margin:0 8px;flex-shrink:0;font-size:11px;padding-top:1px}
+.scene-icon{font-size:12px;flex-shrink:0;margin-right:8px;padding-top:1px}
+.scene-body{flex:1;min-width:0}
+.scene-txt{font-size:12px;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scene-meta{font-size:10px;color:var(--tx3);margin-top:1px;display:flex;gap:8px}
 
-/* ── Budget ── */
-.budget-total{display:flex;align-items:baseline;gap:6px;margin-bottom:10px}
-.budget-amount{font-size:24px;font-weight:700;color:var(--text)}
-.budget-limit{font-size:13px;color:var(--muted)}
-.budget-month{font-size:11px;color:var(--muted);margin-left:auto}
-.budget-item{margin-bottom:10px}
-.budget-item:last-child{margin:0}
-.budget-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
-.budget-cat{font-size:12px;color:var(--text)}
-.budget-val{font-size:12px;color:var(--muted)}
-.bbar{background:var(--faint);border-radius:3px;height:5px;overflow:hidden}
-.bbar-fill{height:5px;border-radius:3px;transition:width .6s cubic-bezier(.4,0,.2,1)}
+/* ── MINI LOG ── */
+.mini-log{display:flex;flex-direction:column}
+.mini-log-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;border-bottom:1px solid var(--bdr);background:var(--sb);padding:0 6px;scrollbar-width:none;flex-shrink:0}
+.mini-log-tabs::-webkit-scrollbar{display:none}
+.mini-log-term{background:#060610;color:#3ddc84;font-family:'SF Mono','Fira Code',ui-monospace,monospace;font-size:10.5px;line-height:1.6;padding:8px 10px;height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;flex:1}
 
-/* ── Trace ── */
-.trace-item{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border)}
-.trace-item:last-child{border:none}
-.trace-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;margin-top:1px}
-.ti-success{background:var(--green-dim);color:var(--green)}
-.ti-fail{background:var(--red-dim);color:var(--red)}
-.trace-body{flex:1;min-width:0}
-.trace-action{font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.trace-detail{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.trace-meta{display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap}
-.trace-tag{font-size:10px;padding:1px 6px;border-radius:10px;background:var(--faint);color:var(--muted)}
-.trace-ts{font-size:10px;color:var(--faint);margin-left:auto;flex-shrink:0}
+/* ── LOG TABS shared ── */
+.log-tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--tx2);padding:7px 11px;font-size:11px;cursor:pointer;font-family:inherit;transition:all .12s;white-space:nowrap}
+.log-tab:hover{color:var(--tx)}
+.log-tab.active{color:var(--green);border-bottom-color:var(--green)}
 
-/* ── Agents ── */
-.agent-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border)}
-.agent-item:last-child{border:none}
-.agent-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-.dot-green{background:var(--green);box-shadow:0 0 0 3px rgba(34,197,94,.15)}
-.dot-red{background:var(--red);box-shadow:0 0 0 3px rgba(239,68,68,.15)}
-.dot-grey{background:var(--faint)}
-.agent-name{font-size:13px;font-weight:600;color:var(--text);flex:1}
-.agent-status{font-size:11px}
-.alive{color:var(--green)}.dead{color:var(--red)}.unknown{color:var(--muted)}
+/* ── AGENTS ── */
+.agent-row{display:flex;align-items:center;gap:9px;padding:8px 14px;border-bottom:1px solid var(--bdr)}
+.agent-row:last-child{border:none}
+.agent-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot-g{background:var(--green);box-shadow:0 0 0 3px rgba(0,208,138,.15)}
+.dot-r{background:var(--red)}
+.dot-x{background:var(--surf3)}
+.agent-name{font-size:12px;color:var(--tx);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alive{color:var(--green);font-size:11px}.dead{color:var(--red);font-size:11px}.unk{color:var(--tx3);font-size:11px}
 
-/* ── Inbox ── */
-.inbox-item{padding:11px 14px;border-bottom:1px solid var(--border)}
-.inbox-item:last-child{border:none}
-.inbox-file{font-size:10px;color:var(--muted);margin-bottom:4px;font-family:'SF Mono',monospace}
-.inbox-text{font-size:12px;color:var(--text);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-
-/* ── Alerts ── */
-.alert-item{display:flex;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border)}
-.alert-item:last-child{border:none}
-.alert-app{font-size:11px;font-weight:600;color:var(--yellow);flex-shrink:0;min-width:80px}
+/* ── INBOX / ALERTS ── */
+.inbox-msg{padding:9px 14px;border-bottom:1px solid var(--bdr);cursor:default}
+.inbox-msg:last-child{border:none}
+.inbox-file{font-size:10px;color:var(--tx3);margin-bottom:2px;font-family:monospace}
+.inbox-text{font-size:12px;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alert-row{display:flex;gap:9px;padding:8px 14px;border-bottom:1px solid var(--bdr)}
+.alert-row:last-child{border:none}
+.alert-app{font-size:11px;font-weight:700;color:var(--yel);flex-shrink:0;min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .alert-line{font-size:11px;color:#fca5a5;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.no-alerts{padding:14px;text-align:center;font-size:13px;color:var(--green)}
+.no-alerts{padding:14px;text-align:center;font-size:12px;color:var(--green)}
 
-/* ── Note form ── */
-.note-form{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--border)}
-.note-input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:7px 10px;font-size:13px;color:var(--text);font-family:inherit;resize:none;outline:none;transition:border-color .15s}
-.note-input:focus{border-color:var(--blue)}
-.note-send{background:var(--blue);color:#fff;border-radius:var(--r-sm);padding:7px 14px;font-size:13px;font-weight:600;transition:opacity .15s;flex-shrink:0}
-.note-send:hover{opacity:.85}
+/* ── APPS ── */
+.apps-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.app-card{background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;transition:border-color .15s}
+.app-card:hover{border-color:var(--bdr2)}
+.app-card-hdr{padding:11px 14px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:8px}
+.app-health{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.app-name{font-size:13px;font-weight:700;color:var(--tx);flex:1}
+.app-body{padding:10px 14px}
+.app-views{font-size:22px;font-weight:800;color:var(--tx);line-height:1}
+.app-views-sub{font-size:11px;color:var(--tx2);margin-top:2px}
+.app-top{font-size:10px;color:var(--tx3);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.app-prog{margin-top:8px}
+.app-prog-row{display:flex;justify-content:space-between;font-size:11px;color:var(--tx2);margin-bottom:3px}
+.app-prog-bar{height:4px;background:var(--surf3);border-radius:2px;overflow:hidden}
+.app-prog-fill{height:4px;border-radius:2px;transition:width .5s}
+.kv-row{display:flex;justify-content:space-between;font-size:11px;margin-top:4px;gap:8px}
+.kv-k{color:var(--tx2);flex-shrink:0}.kv-v{color:var(--tx);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 
-/* ── Remote control ── */
-#rc-wrap{position:fixed;bottom:0;left:0;right:0;z-index:200;background:rgba(9,9,11,.96);border-top:1px solid var(--border);backdrop-filter:blur(12px)}
-#rc-inner{max-width:900px;margin:0 auto;padding:8px 16px}
-#rc-bar{display:flex;gap:6px;flex-wrap:wrap}
-.rc-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--r-sm);padding:6px 12px;font-size:12px;font-weight:600;transition:all .15s;white-space:nowrap}
-.rc-btn:hover{background:var(--faint);border-color:var(--muted)}
-.rc-btn.active{background:var(--blue-dim);border-color:var(--blue);color:var(--blue)}
-#rc-drawer{display:none;padding:10px 0 4px}
-#rc-drawer input,#rc-drawer textarea,#rc-drawer select{display:block;width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:7px 10px;font-size:13px;color:var(--text);font-family:inherit;outline:none;margin-bottom:6px;transition:border-color .15s}
-#rc-drawer input:focus,#rc-drawer textarea:focus,#rc-drawer select:focus{border-color:var(--blue)}
-#rc-drawer textarea{resize:none}
-#rc-drawer .rc-row{display:flex;gap:8px}
-#rc-drawer .rc-row input,#rc-drawer .rc-row select{margin-bottom:0}
-#rc-drawer .rc-submit{display:inline-block;background:var(--blue);color:#fff;border:none;border-radius:var(--r-sm);padding:7px 18px;font-size:13px;font-weight:600;cursor:pointer;margin-top:6px}
-#rc-drawer .rc-submit:hover{opacity:.85}
-#rc-feedback{font-size:13px;padding:6px 0}
+/* ── TASKS ── */
+.tasks-layout{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start}
+.task-row{display:flex;align-items:center;gap:9px;padding:10px 14px;border-bottom:1px solid var(--bdr);transition:background .1s}
+.task-row:last-child{border:none}
+.task-row:hover{background:var(--surf2)}
+.task-pri{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;flex-shrink:0;text-transform:uppercase;letter-spacing:.04em}
+.ph{background:var(--rdim);color:var(--red)}.pm{background:var(--bdim);color:var(--blue)}.pl{background:rgba(255,255,255,.06);color:var(--tx2)}
+.task-desc{flex:1;font-size:13px;color:var(--tx);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-id{font-size:11px;color:var(--tx3);flex-shrink:0}
+.task-btn{background:none;border:1px solid var(--bdr2);color:var(--tx2);font-size:11px;padding:3px 8px;border-radius:4px;font-family:inherit;transition:all .12s;flex-shrink:0}
+.task-btn:hover{background:var(--gdim);border-color:var(--green);color:var(--green)}
+.task-empty{padding:22px;text-align:center;color:var(--tx3);font-size:13px}
+.add-form{background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);padding:16px}
+.form-ttl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--tx3);margin-bottom:12px}
+.finput{display:block;width:100%;background:var(--surf2);border:1px solid var(--bdr2);border-radius:var(--rsm);padding:8px 10px;font-size:13px;color:var(--tx);font-family:inherit;outline:none;margin-bottom:8px;transition:border-color .12s;resize:none}
+.finput:focus{border-color:var(--blue)}
+.frow{display:flex;gap:8px;align-items:center}
+.fselect{flex:1;background:var(--surf2);border:1px solid var(--bdr2);border-radius:var(--rsm);padding:8px 10px;font-size:12px;color:var(--tx);font-family:inherit;outline:none;cursor:pointer}
+.fbtn{background:var(--blue);color:#fff;border:none;border-radius:var(--rsm);padding:8px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;transition:opacity .12s;flex-shrink:0}
+.fbtn:hover{opacity:.85}
+.fbtn.g{background:var(--green)}.fbtn.s{background:var(--surf2);border:1px solid var(--bdr2);color:var(--tx2)}
+.ffb{font-size:12px;margin-top:8px;min-height:20px}
 
-/* ── Util ── */
-.row-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.empty{padding:14px;text-align:center;color:var(--muted);font-size:13px}
-.badge{display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--blue-dim);color:var(--blue)}
-.badge.green{background:var(--green-dim);color:var(--green)}
-.badge.red{background:var(--red-dim);color:var(--red)}
-.badge.yellow{background:var(--yellow-dim);color:var(--yellow)}
-@keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-@media(max-width:600px){.row-2{grid-template-columns:1fr}}
+/* ── LOGS (full) ── */
+#s-logs.active .log-panel{flex:1;display:flex;flex-direction:column;min-height:0;background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden}
+.log-term-hdr{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--bdr);flex-shrink:0}
+.log-term-lbl{font-size:11px;color:var(--tx2);font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-term-live{font-size:10px;color:var(--green);display:flex;align-items:center;gap:4px}
+.log-full-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;border-bottom:1px solid var(--bdr);background:var(--sb);padding:0 8px;flex-shrink:0;scrollbar-width:none}
+.log-full-tabs::-webkit-scrollbar{display:none}
+.log-terminal{flex:1;min-height:0;background:#060610;color:#3ddc84;font-family:'SF Mono','Fira Code',ui-monospace,monospace;font-size:11.5px;line-height:1.65;padding:12px 16px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.log-line{animation:fl .1s ease}
+@keyframes fl{from{opacity:0}to{opacity:1}}
+
+/* ── BUDGET ── */
+.budget-layout{display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start}
+.budget-sum{background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);padding:20px}
+.b-total{font-size:36px;font-weight:800;color:var(--tx);line-height:1}
+.b-month{font-size:12px;color:var(--tx2);margin-top:4px}
+.b-prog{background:var(--surf3);border-radius:4px;height:8px;overflow:hidden;margin-top:14px}
+.b-prog-fill{height:8px;border-radius:4px;transition:width .6s}
+.b-limit{font-size:12px;color:var(--tx2);margin-top:8px}
+.budget-cats{background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);padding:16px}
+.bcat-row{display:flex;align-items:center;gap:10px;margin-bottom:13px}
+.bcat-row:last-child{margin:0}
+.bcat-name{font-size:13px;color:var(--tx);width:130px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bcat-bar{flex:1;background:var(--surf3);border-radius:3px;height:5px;overflow:hidden}
+.bcat-fill{height:5px;border-radius:3px;transition:width .5s}
+.bcat-val{font-size:12px;color:var(--tx2);width:100px;text-align:right;flex-shrink:0}
+
+/* ── TRACE ── */
+.trace-row{display:flex;align-items:flex-start;gap:10px;padding:11px 16px;border-bottom:1px solid var(--bdr)}
+.trace-row:last-child{border:none}
+.trace-char{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx2);min-width:110px;flex-shrink:0;padding-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trace-icon{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;margin-top:0}
+.ti-ok{background:var(--gdim);color:var(--green)}.ti-fail{background:var(--rdim);color:var(--red)}
+.trace-body{flex:1;min-width:0}
+.trace-action{font-size:13px;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trace-detail{font-size:11px;color:var(--tx2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trace-foot{display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap}
+.trace-tag{font-size:10px;padding:1px 6px;border-radius:8px;background:var(--surf3);color:var(--tx3)}
+.trace-ts{font-size:10px;color:var(--tx3);margin-left:auto;flex-shrink:0}
+
+/* ── ACTION DRAWER ── */
+.drawer{
+  position:fixed;bottom:0;left:var(--sbw);right:0;z-index:200;
+  background:rgba(13,13,20,.97);border-top:1px solid var(--bdr2);
+  backdrop-filter:blur(16px);
+  transform:translateY(100%);transition:transform .2s cubic-bezier(.4,0,.2,1);
+  padding:16px 20px 18px;
+}
+.drawer.open{transform:translateY(0)}
+.drawer-ttl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--tx2);margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
+.drawer-close{background:none;border:none;color:var(--tx2);font-size:18px;cursor:pointer;padding:0 2px;line-height:1;transition:color .12s}
+.drawer-close:hover{color:var(--tx)}
+
+/* ── MOBILE TABS ── */
+#mob-tabs{
+  display:none;
+  position:fixed;bottom:0;left:0;right:0;z-index:100;
+  background:rgba(10,10,18,.97);border-top:1px solid var(--bdr);
+  backdrop-filter:blur(12px);height:56px;
+  flex-direction:row;align-items:stretch;
+}
+.mob-tab{flex:1;background:none;border:none;color:var(--tx2);font-size:10px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;transition:color .12s;position:relative}
+.mob-tab.active{color:var(--blue)}
+.mob-icon{font-size:16px;line-height:1}
+.mob-badge{position:absolute;top:6px;right:calc(50% - 15px);background:var(--red);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;padding:0 3px;display:none;align-items:center;justify-content:center}
+
+/* ── UTILS ── */
+.badge{display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;min-width:18px;height:18px;padding:0 5px;border-radius:9px}
+.b-blue{background:var(--bdim);color:var(--blue)}.b-green{background:var(--gdim);color:var(--green)}
+.b-red{background:var(--rdim);color:var(--red)}.b-yel{background:var(--ydim);color:var(--yel)}
+.empty{padding:20px;text-align:center;color:var(--tx3);font-size:13px}
+.mt16{margin-top:16px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+@media(max-width:1100px){.live-grid,.row2{grid-template-columns:1fr}}
+@media(max-width:768px){
+  :root{--sbw:0px}
+  #sidebar{display:none}
+  #page{margin-left:0}
+  #mob-tabs{display:flex}
+  #main{padding:12px 12px 68px}
+  .tasks-layout,.budget-layout,.live-grid,.row2{grid-template-columns:1fr}
+  .drawer{left:0}
+  .stats-strip{grid-template-columns:1fr 1fr}
+  .stat-cell:last-child,.stat-cell:nth-child(3){display:none}
+}
 </style>
 </head>
 <body>
 
-<div id="hdr">
-  <div id="hdr-left">
-    <div id="live-label"><div class="live-dot"></div>NOW LIVE</div>
-    <h1>Agent Computer</h1>
+<!-- SIDEBAR -->
+<div id="sidebar">
+  <div class="sb-logo">
+    <div class="live-dot"></div>
+    <span class="sb-logo-name">Agent Computer</span>
+    <span class="sb-ver" id="sb-ver">v?</span>
   </div>
-  <div id="hdr-right">
-    <span id="ts">connecting…</span>
-    <span id="disk-badge"></span>
+  <div class="sb-sec">
+    <div class="sb-lbl">MONITOR</div>
+    <button class="nav-item active" data-nav="live" onclick="navTo('live')"><span class="nav-icon">⬤</span>Live Feed</button>
+    <button class="nav-item" data-nav="apps" onclick="navTo('apps')"><span class="nav-icon">⊞</span>Apps</button>
+    <button class="nav-item" data-nav="logs" onclick="navTo('logs')"><span class="nav-icon">≡</span>Log Viewer</button>
+  </div>
+  <div class="sb-sec">
+    <div class="sb-lbl">MANAGE</div>
+    <button class="nav-item" data-nav="tasks" onclick="navTo('tasks')"><span class="nav-icon">✓</span>Tasks<span id="sb-tasks-badge" class="nav-badge">0</span></button>
+    <button class="nav-item" data-nav="budget" onclick="navTo('budget')"><span class="nav-icon">$</span>Budget</button>
+    <button class="nav-item" data-nav="trace" onclick="navTo('trace')"><span class="nav-icon">◎</span>Trace</button>
+  </div>
+  <div class="sb-actions">
+    <div class="sb-lbl">ACTIONS</div>
+    <button class="sb-act-btn" data-act="add-task" onclick="openDrawer('add-task')"><span class="nav-icon">＋</span>Add Task</button>
+    <button class="sb-act-btn" data-act="log" onclick="openDrawer('log')"><span class="nav-icon">✓</span>Log Outcome</button>
+    <button class="sb-act-btn" data-act="run" onclick="openDrawer('run')"><span class="nav-icon">▶</span>Run Job</button>
+    <button class="sb-act-btn" data-act="note" onclick="openDrawer('note')"><span class="nav-icon">✎</span>Note</button>
+    <button class="sb-act-btn" onclick="clearAlerts()"><span class="nav-icon">✗</span>Clear Alerts</button>
+  </div>
+  <div class="sb-disk">
+    <div class="sb-disk-row"><span>Disk</span><span id="sb-disk-txt">—</span></div>
+    <div class="sb-disk-bar"><div id="sb-disk-fill" class="sb-disk-fill" style="width:0%;background:var(--green)"></div></div>
   </div>
 </div>
 
-<div id="mission-bar">
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-  <span id="mission-text"></span>
-</div>
+<!-- PAGE -->
+<div id="page">
+  <div id="topbar">
+    <div class="tb-title" id="tb-title">Live Feed</div>
+    <div class="tb-mission" id="tb-mission"></div>
+    <span class="tb-disk" id="tb-disk">—</span>
+    <span class="tb-time" id="tb-time">connecting…</span>
+  </div>
 
-<div id="main">
+  <div id="main">
 
-  <!-- Activity + Log Viewer row -->
-  <div class="row-2">
-    <div class="card">
-      <div class="card-hdr">
-        <span class="card-title">Activity</span>
-        <span style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)">trace · inbox · alerts</span>
+    <!-- LIVE -->
+    <div id="s-live" class="section active">
+      <!-- NOW PLAYING -->
+      <div class="hero" id="hero">
+        <div class="hero-badge"><span style="width:6px;height:6px;border-radius:50%;background:var(--red);display:inline-block;animation:ldot 1.6s ease-in-out infinite"></span>NOW PLAYING</div>
+        <div id="hero-content"><div class="hero-idle">Waiting for agent activity…</div></div>
       </div>
-      <div id="act-list" class="card-body no-pad" style="max-height:280px;overflow-y:auto">
-        <div class="empty">connecting…</div>
+      <!-- Stats -->
+      <div class="stats-strip" id="stats-strip">
+        <div class="stat-cell"><div class="stat-lbl">Disk Used</div><div class="stat-val" id="st-disk">—</div><div class="stat-sub" id="st-disk-sub">—</div></div>
+        <div class="stat-cell"><div class="stat-lbl">Open Tasks</div><div class="stat-val" id="st-tasks">—</div><div class="stat-sub">tasks</div></div>
+        <div class="stat-cell"><div class="stat-lbl">Agents</div><div class="stat-val" id="st-agents">—</div><div class="stat-sub">alive</div></div>
+        <div class="stat-cell"><div class="stat-lbl">Cron Jobs</div><div class="stat-val" id="st-cron">—</div><div class="stat-sub">scheduled</div></div>
       </div>
-    </div>
-    <div class="card">
-      <div class="card-hdr">
-        <span class="card-title">Live Log</span>
-        <span id="log-label" style="font-size:11px;color:var(--muted)">select a source</span>
+      <!-- Feed + Log -->
+      <div class="live-grid">
+        <div class="card">
+          <div class="card-hdr">
+            <div class="live-dot" style="width:6px;height:6px"></div>
+            <span class="card-ttl">Scene Feed</span>
+            <span class="card-sub">trace · inbox · alerts</span>
+          </div>
+          <div id="scene-feed" class="scene-feed"><div class="empty">connecting…</div></div>
+        </div>
+        <div class="card mini-log">
+          <div class="card-hdr"><span class="card-ttl">Log Stream</span><span class="card-sub" id="mini-log-lbl">no source</span></div>
+          <div class="mini-log-tabs" id="mini-log-tabs"></div>
+          <div class="mini-log-term" id="mini-log-term"></div>
+        </div>
       </div>
-      <div id="log-tabs"><span style="font-size:11px;color:var(--muted);padding:6px 10px">loading sources…</span></div>
-      <div id="log-lines"><div id="log-empty" style="padding:20px;text-align:center;color:var(--muted);font-size:12px">select a log tab above</div></div>
-    </div>
-  </div>
-
-  <!-- Apps section (auto-discovered) -->
-  <div class="card" id="apps-card" style="display:none">
-    <div class="card-hdr">
-      <span class="card-title">Apps</span>
-      <span id="apps-badge" class="badge green"></span>
-    </div>
-    <div class="card-body no-pad"><div class="ch-grid" id="apps-grid"></div></div>
-  </div>
-
-  <!-- System pulse -->
-  <div class="card" id="sys-card">
-    <div class="card-hdr">
-      <span class="card-title">System Pulse</span>
-      <span id="sys-version" style="font-size:11px;color:var(--muted)"></span>
-    </div>
-    <div class="stat-grid" id="sys-stats"></div>
-    <div class="disk-wrap" id="disk-section"></div>
-  </div>
-
-  <!-- Tasks + Agents -->
-  <div class="row-2">
-    <div class="card">
-      <div class="card-hdr"><span class="card-title">Tasks</span><span id="task-badge" class="badge">0</span></div>
-      <div class="card-body no-pad" id="task-list"></div>
-    </div>
-    <div class="card">
-      <div class="card-hdr"><span class="card-title">Agents</span></div>
-      <div class="card-body no-pad" id="agent-list"></div>
-    </div>
-  </div>
-
-  <!-- Budget + Trace -->
-  <div class="row-2">
-    <div class="card">
-      <div class="card-hdr"><span class="card-title">Budget</span></div>
-      <div class="card-body" id="budget-body"></div>
-    </div>
-    <div class="card">
-      <div class="card-hdr"><span class="card-title">Trace</span><span id="trace-count" style="font-size:11px;color:var(--muted)"></span></div>
-      <div class="card-body no-pad" id="trace-list"></div>
-    </div>
-  </div>
-
-  <!-- Inbox + Alerts -->
-  <div class="row-2">
-    <div class="card">
-      <div class="card-hdr"><span class="card-title">Inbox</span><span id="inbox-badge"></span></div>
-      <div class="card-body no-pad" id="inbox-list"></div>
-      <div class="note-form">
-        <textarea class="note-input" id="note-input" rows="1" placeholder="Leave a note for next agent…"></textarea>
-        <button class="note-send" onclick="sendNote()">Send</button>
+      <!-- Agents + Inbox + Alerts -->
+      <div class="row2 mt16">
+        <div>
+          <div class="card">
+            <div class="card-hdr"><span class="card-ttl">Cast — Agents</span></div>
+            <div id="agent-list"><div class="empty">loading…</div></div>
+          </div>
+          <div class="card mt16">
+            <div class="card-hdr"><span class="card-ttl">Alerts</span><button class="task-btn" style="font-size:10px;padding:2px 7px" onclick="clearAlerts()">clear</button></div>
+            <div id="alerts-list"><div class="no-alerts">✓ No errors in last 24h</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-hdr"><span class="card-ttl">Inbox</span><span id="inbox-badge" class="badge b-yel" style="display:none"></span></div>
+          <div id="inbox-list"><div class="empty">inbox empty</div></div>
+        </div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-hdr"><span class="card-title">Alerts</span><span id="alert-badge"></span></div>
-      <div class="card-body no-pad" id="alert-list"></div>
+
+    <!-- APPS -->
+    <div id="s-apps" class="section">
+      <div class="sec-hdr"><span class="sec-title">Apps</span><span class="sec-sub" id="apps-count"></span></div>
+      <div class="apps-grid" id="apps-grid"><div class="empty">scanning ~/apps/…</div></div>
     </div>
-  </div>
 
-  <!-- Scheduled jobs -->
-  <div class="card" id="sched-card" style="display:none">
-    <div class="card-hdr"><span class="card-title">Scheduled Jobs</span><span id="sched-badge" class="badge"></span></div>
-    <div class="card-body no-pad" id="sched-list"></div>
-  </div>
-
-</div>
-
-<!-- Remote Control (fixed bottom) -->
-<div id="rc-wrap">
-  <div id="rc-inner">
-    <div id="rc-bar">
-      <button class="rc-btn" onclick="toggleRC('add-task')" id="rcb-add-task">＋ Task</button>
-      <button class="rc-btn" onclick="toggleRC('log-outcome')" id="rcb-log-outcome">✓ Log</button>
-      <button class="rc-btn" onclick="toggleRC('run-job')" id="rcb-run-job">▶ Run Job</button>
-      <button class="rc-btn" onclick="toggleRC('note')" id="rcb-note">✎ Note</button>
-      <button class="rc-btn" onclick="clearAlerts()" id="rcb-alerts">✗ Clear Alerts</button>
+    <!-- TASKS -->
+    <div id="s-tasks" class="section">
+      <div class="sec-hdr"><span class="sec-title">Tasks</span></div>
+      <div class="tasks-layout">
+        <div>
+          <div class="card" id="task-card"><div id="task-list"><div class="empty">loading…</div></div></div>
+          <div class="card mt16" id="sched-card" style="display:none">
+            <div class="card-hdr"><span class="card-ttl">Scheduled Jobs</span><span id="sched-count" class="badge b-blue"></span></div>
+            <div id="sched-list"></div>
+          </div>
+        </div>
+        <div class="add-form">
+          <div class="form-ttl">Add New Task</div>
+          <input class="finput" id="task-desc" placeholder="Describe the task…" maxlength="500" autocomplete="off">
+          <div class="frow">
+            <select class="fselect" id="task-pri">
+              <option value="medium">Medium priority</option>
+              <option value="high">High priority</option>
+              <option value="low">Low priority</option>
+            </select>
+            <button class="fbtn" onclick="addTask()">Add Task</button>
+          </div>
+          <div class="ffb" id="task-fb"></div>
+        </div>
+      </div>
     </div>
-    <div id="rc-drawer"></div>
-  </div>
+
+    <!-- LOGS -->
+    <div id="s-logs" class="section">
+      <div class="log-panel">
+        <div class="log-term-hdr">
+          <span class="log-term-lbl" id="log-lbl">select a log source below</span>
+          <span class="log-term-live"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span>live</span>
+        </div>
+        <div class="log-full-tabs" id="log-tabs"></div>
+        <div class="log-terminal" id="log-terminal"></div>
+      </div>
+    </div>
+
+    <!-- BUDGET -->
+    <div id="s-budget" class="section">
+      <div class="sec-hdr"><span class="sec-title">Budget</span></div>
+      <div class="budget-layout">
+        <div class="budget-sum" id="budget-sum"></div>
+        <div class="budget-cats" id="budget-cats"></div>
+      </div>
+    </div>
+
+    <!-- TRACE -->
+    <div id="s-trace" class="section">
+      <div class="sec-hdr"><span class="sec-title">Trace Log</span><span class="sec-sub" id="trace-count"></span></div>
+      <div class="card"><div id="trace-list"><div class="empty">loading…</div></div></div>
+    </div>
+
+  </div><!-- #main -->
+</div><!-- #page -->
+
+<!-- ACTION DRAWER -->
+<div id="drawer" class="drawer"></div>
+
+<!-- MOBILE TABS -->
+<div id="mob-tabs">
+  <button class="mob-tab active" data-nav="live" onclick="mobNav('live')"><span class="mob-icon">⬤</span><span>Live</span></button>
+  <button class="mob-tab" data-nav="apps" onclick="mobNav('apps')"><span class="mob-icon">⊞</span><span>Apps</span></button>
+  <button class="mob-tab" data-nav="tasks" onclick="mobNav('tasks')"><span class="mob-icon">✓</span><span>Tasks</span><span class="mob-badge" id="mob-badge" style="display:none">0</span></button>
+  <button class="mob-tab" data-nav="logs" onclick="mobNav('logs')"><span class="mob-icon">≡</span><span>Logs</span></button>
+  <button class="mob-tab" data-nav="trace" onclick="mobNav('trace')"><span class="mob-icon">◎</span><span>Trace</span></button>
 </div>
 
 <script>
 const $ = id => document.getElementById(id)
-const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
 const fmt = n => Number(n||0).toLocaleString()
 
 function timeAgo(ts) {
   if (!ts) return ''
   try {
     const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-    if (s < 60) return `${s}s ago`
-    if (s < 3600) return `${Math.floor(s/60)}m ago`
-    if (s < 86400) return `${Math.floor(s/3600)}h ago`
-    return `${Math.floor(s/86400)}d ago`
+    if (s < 10) return 'just now'
+    if (s < 60) return s+'s ago'
+    if (s < 3600) return Math.floor(s/60)+'m ago'
+    if (s < 86400) return Math.floor(s/3600)+'h ago'
+    return Math.floor(s/86400)+'d ago'
   } catch { return '' }
 }
 
-function diskArc(pct, color) {
-  const r=26,cx=32,cy=32,circ=2*Math.PI*r,dash=(pct/100)*circ
-  return `<svg width="64" height="64" viewBox="0 0 64 64">
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#27272a" stroke-width="8"/>
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="8"
-      stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/></svg>`
+function barColor(p) { return p>=90?'var(--red)':p>=70?'var(--yel)':'var(--blue)' }
+function diskColor(p) { return p>=90?'var(--red)':p>=75?'var(--yel)':'var(--green)' }
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+
+const SEC_TITLES = {live:'Live Feed',apps:'Apps',tasks:'Tasks',logs:'Log Viewer',budget:'Budget',trace:'Trace Log'}
+let _cur = 'live'
+
+function navTo(name) {
+  _cur = name
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'))
+  document.querySelectorAll('[data-nav]').forEach(n => n.classList.remove('active'))
+  const sec = $('s-'+name); if (sec) sec.classList.add('active')
+  document.querySelectorAll(`[data-nav="${name}"]`).forEach(n => n.classList.add('active'))
+  const tt = $('tb-title'); if (tt) tt.textContent = SEC_TITLES[name] || 'Agent Computer'
 }
-function barColor(p){return p>=90?'#ef4444':p>=70?'#eab308':'#3b82f6'}
-function diskColor(p){return p>=90?'#ef4444':p>=75?'#eab308':'#22c55e'}
+function mobNav(name) { navTo(name) }
 
-// ── Renderers ─────────────────────────────────────────────────────────────────
+// ── Hero ──────────────────────────────────────────────────────────────────────
 
-function render(s) {
-  const sys=s.system||{}, env=s.env||{}
-  window._lastSched = s.sched || []
-
-  // Header
-  const pct=sys.used_pct||0, dc=diskColor(pct)
-  $('ts').textContent = 'live · '+(s.ts||'').slice(11,16)+' UTC'
-  const db=$('disk-badge')
-  db.textContent=(sys.free_gb||'?')+' GB free'
-  db.style.cssText=`background:${dc}22;color:${dc};padding:3px 8px;border-radius:20px;font-size:11px;font-weight:700`
-
-  // Mission
-  if (env.mission) {
-    $('mission-bar').style.display='flex'
-    $('mission-text').textContent=env.mission
-  }
-
-  // System pulse
-  $('sys-version').textContent='v'+(sys.version||'?')
-  $('sys-stats').innerHTML=`
-    <div class="stat-cell"><div class="stat-label">Host</div><div class="stat-value" style="font-size:13px;font-family:monospace">${esc(sys.hostname||'?')}</div></div>
-    <div class="stat-cell"><div class="stat-label">Cron Jobs</div><div class="stat-value">${esc((s.cron||[]).length)}</div></div>`
-  const sessions=(sys.sessions||[]).map(s=>`<span class="session-chip">● ${esc(s)}</span>`).join('')
-  const color=diskColor(pct), arc=diskArc(pct,color)
-  $('disk-section').innerHTML=`
-    <div class="disk-arc">${arc}<div class="disk-arc-text" style="color:${color}">${pct}%</div></div>
-    <div class="disk-detail">
-      <div style="font-size:13px;font-weight:600;color:${color}">${sys.free_gb} GB free</div>
-      <div style="font-size:11px;color:var(--muted)">of ${sys.total_gb} GB total</div>
-      <div class="disk-bar-wrap"><div class="disk-bar" style="width:${pct}%;background:${color}"></div></div>
-      <div class="sessions-row">${sessions||'<span style="font-size:11px;color:var(--muted)">no sessions</span>'}</div>
-    </div>`
-
-  // Apps (generic)
-  renderApps(s.apps||[])
-
-  // Activity feed
-  renderActivity(s.activity||[])
-
-  // Log tabs (dynamic)
-  populateLogTabs(s.log_sources||[])
-
-  // Tasks
-  const tasks=s.tasks||[], open=tasks.filter(t=>t.status==='open')
-  $('task-badge').textContent=open.length
-  $('task-badge').className='badge'+(open.length?'':' green')
-  $('task-list').innerHTML=open.length?open.map(t=>{
-    const pc={high:'pri-high',medium:'pri-medium',low:'pri-low'}[t.priority||'medium']||'pri-medium'
-    return `<div class="task-item">
-      <span class="task-pri ${pc}">${esc(t.priority||'med')}</span>
-      <span class="task-desc" title="${esc(t.desc)}">${esc(t.desc)}</span>
-      <span class="task-id">#${t.id}</span>
-      <button class="task-done-btn" onclick="markDone(${t.id},this)">done</button>
-    </div>`
-  }).join(''):`<div class="task-empty">✓ No open tasks</div>`
-
-  // Agents
-  const agents=s.agents||{}
-  $('agent-list').innerHTML=Object.keys(agents).length?Object.entries(agents).map(([name,info])=>{
-    const a=info.alive, dc2=a===true?'dot-green':a===false?'dot-red':'dot-grey'
-    const sc=a===true?'alive':a===false?'dead':'unknown'
-    const sl=a===true?'alive':a===false?'unreachable':'no check'
-    return `<div class="agent-item"><div class="agent-dot ${dc2}"></div><div class="agent-name">${esc(name)}</div><div class="agent-status ${sc}">${sl}</div></div>`
-  }).join(''):`<div class="empty">no agents registered</div>`
-
-  // Budget
-  const budget=s.budget||{}, bycat=budget.by_category||{}, thresh=budget.thresholds||{}
-  const total=budget.total||0, tt=parseFloat(thresh.total||0), tp=tt?Math.min(100,total/tt*100):0
-  let bh=`<div class="budget-total">
-    <span class="budget-amount">$${total.toFixed(4)}</span>
-    ${tt?`<span class="budget-limit">/ $${tt.toFixed(2)}</span>`:''}
-    <span class="budget-month">${esc(budget.month||'')}</span></div>`
-  if(tt) bh+=`<div class="bbar" style="margin-bottom:12px"><div class="bbar-fill" style="width:${tp.toFixed(1)}%;background:${barColor(tp)}"></div></div>`
-  for(const[cat,val]of Object.entries(bycat)){
-    const ct=parseFloat(thresh[cat]||0),cp=ct?Math.min(100,val/ct*100):0
-    bh+=`<div class="budget-item"><div class="budget-row"><span class="budget-cat">${esc(cat)}</span><span class="budget-val">$${val.toFixed(4)}${ct?' / $'+ct.toFixed(2):''}</span></div>${ct?`<div class="bbar"><div class="bbar-fill" style="width:${cp.toFixed(1)}%;background:${barColor(cp)}"></div></div>`:''}</div>`
-  }
-  if(!Object.keys(bycat).length) bh+=`<div style="color:var(--muted);font-size:13px">no spend logged this month</div>`
-  $('budget-body').innerHTML=bh
-
-  // Trace
-  const trace=s.trace||[], recent=[...trace].reverse().slice(0,12)
-  $('trace-count').textContent=recent.length+' outcomes'
-  $('trace-list').innerHTML=recent.length?recent.map(e=>{
-    const ok=e.outcome==='success', tags=(e.tags||[]).map(t=>`<span class="trace-tag">${esc(t)}</span>`).join('')
-    return `<div class="trace-item">
-      <div class="trace-icon ${ok?'ti-success':'ti-fail'}">${ok?'✓':'✗'}</div>
-      <div class="trace-body">
-        <div class="trace-action" title="${esc(e.action)}">${esc(e.action)}</div>
-        ${e.detail?`<div class="trace-detail">${esc(e.detail)}</div>`:''}
-        <div class="trace-meta">${tags}<span class="trace-ts">${(e.ts||'').slice(5,10)}</span></div>
-      </div></div>`
-  }).join(''):`<div class="empty">no outcomes logged yet</div>`
-
-  // Inbox
-  const inbox=s.inbox||[]
-  const ib=$('inbox-badge')
-  ib.textContent=inbox.length||''
-  ib.className='badge yellow'+(inbox.length?'':' green')
-  $('inbox-list').innerHTML=inbox.length?inbox.map(n=>`<div class="inbox-item">
-    <div class="inbox-file">${esc(n.file)}</div>
-    <div class="inbox-text">${esc(n.text)}</div>
-  </div>`).join(''):`<div class="empty">inbox empty</div>`
-
-  // Alerts
-  const alerts=s.alerts||[]
-  const ab=$('alert-badge')
-  ab.textContent=alerts.length||''
-  ab.className=alerts.length?'badge red':'badge green'
-  $('alert-list').innerHTML=alerts.length?alerts.map(a=>
-    `<div class="alert-item"><span class="alert-app">${esc(a.app)}</span><span class="alert-line">${esc(a.line)}</span></div>`
-  ).join(''):`<div class="no-alerts">✓ No errors in last 24h</div>`
-
-  // Sched
-  const sched=s.sched||[]
-  if(sched.length){
-    $('sched-card').style.display=''
-    $('sched-badge').textContent=sched.length
-    $('sched-list').innerHTML=sched.map(j=>{
-      const paused=j.paused, lr=j.last_run?j.last_run.slice(0,10):'never'
-      const le=j.last_exit!==null?(j.last_exit===0?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--red)">✗</span>'):''
-      return `<div class="task-item">
-        <span class="task-pri ${paused?'pri-low':'pri-medium'}">${paused?'paused':esc(j.schedule_human||j.cron||'?')}</span>
-        <span class="task-desc">${esc(j.name)}</span>
-        <span class="task-id">${lr} ${le}</span>
-      </div>`
-    }).join('')
-  } else $('sched-card').style.display='none'
+function updateHero(trace) {
+  const el = $('hero-content'); if (!el) return
+  const items = [...trace].reverse()
+  const latest = items[0]
+  if (!latest) { el.innerHTML = '<div class="hero-idle">Watching for agent activity…</div>'; return }
+  const ok = latest.outcome === 'success'
+  const agent = latest.agent || 'agent'
+  el.innerHTML = `
+    <div class="hero-beat">
+      <div class="hero-char">${esc(agent)}</div>
+      <div class="hero-icon" style="color:${ok?'var(--green)':'var(--red)'}">${ok?'✓':'✗'}</div>
+      <div class="hero-action">${esc(latest.action)}</div>
+    </div>
+    ${latest.detail?`<div class="hero-detail">${esc(latest.detail)}</div>`:''}
+    <div class="hero-ts">${timeAgo(latest.ts)}</div>`
 }
 
-function renderApps(apps) {
-  const SKIP=new Set(['done_today','expected_today','errors_today','healthy','checked','live_processes','alerts','fixes'])
-  if(!apps.length){$('apps-card').style.display='none';return}
-  $('apps-card').style.display=''
-  $('apps-badge').textContent=apps.length
-  $('apps-grid').innerHTML=apps.map(app=>{
-    const st=app.status||{}, healthy=st.healthy
-    const hc=healthy===true?'var(--green)':healthy===false?'var(--red)':'var(--muted)'
-    const hasP=st.done_today!==undefined&&st.expected_today!==undefined
-    const done=st.done_today||0, exp=st.expected_today||0, prog=exp?Math.round(done/exp*100):0
-    const errors=st.errors_today||0
-    const kv=Object.entries(st).filter(([k])=>!SKIP.has(k)).slice(0,3)
-      .map(([k,v])=>`<div class="kv-row"><span class="kv-k">${esc(k)}</span><span class="kv-v">${esc(typeof v==='object'?JSON.stringify(v).slice(0,40):String(v).slice(0,50))}</span></div>`).join('')
-    const views7d=app.views_7d
-    const topVideo=app.top_video
-    return `<div class="ch-card">
-      <div class="ch-name">
-        <div class="ch-dot" style="background:${hc}"></div>
-        ${esc(app.name)}
-        ${errors>0?`<span class="badge red">${errors} err`+`</span>`:''}
+// ── Scene Feed ────────────────────────────────────────────────────────────────
+
+let _lastActKeys = []
+
+function renderActivity(events) {
+  const el = $('scene-feed'); if (!el) return
+  const keys = events.map(e => e.ts+'|'+e.type+'|'+(e.text||'').slice(0,30))
+  const newSet = new Set(keys.filter(k => !_lastActKeys.includes(k)))
+  _lastActKeys = keys
+  if (!events.length) { el.innerHTML = '<div class="empty">watching for agent activity…</div>'; return }
+  el.innerHTML = events.map(e => {
+    const isNew = newSet.has(e.ts+'|'+e.type+'|'+(e.text||'').slice(0,30))
+    const agent = e.agent || e.type
+    return `<div class="scene-item${isNew?' is-new':''}">
+      <div class="scene-char" title="${esc(agent)}">${esc(agent)}</div>
+      <div class="scene-sep">→</div>
+      <div class="scene-icon" style="color:${e.color}">${esc(e.icon)}</div>
+      <div class="scene-body">
+        <div class="scene-txt" title="${esc(e.text)}">${esc(e.text)}</div>
+        <div class="scene-meta"><span>${esc(e.type)}</span><span>${timeAgo(e.ts)}</span></div>
       </div>
-      ${hasP?`<div class="ch-progress"><div class="ch-prog-bar"><div class="ch-prog-fill" style="width:${prog}%;background:${hc}"></div></div><div class="ch-prog-text">${done}/${exp}</div></div>`:''}
-      ${views7d?`<div class="ch-views">${fmt(views7d)}<span style="font-size:11px;color:var(--muted);font-weight:400"> views 7d</span></div>`:''}
-      ${topVideo?`<div class="ch-top">"${esc(topVideo)}" · ${fmt(app.top_views||0)} views</div>`:''}
-      ${kv}
     </div>`
   }).join('')
 }
 
-function renderActivity(events) {
-  $('act-list').innerHTML=events.length?events.map(e=>`<div class="act-item">
-    <div class="act-icon" style="background:${e.color}22;color:${e.color}">${esc(e.icon)}</div>
-    <div class="act-body">
-      <div class="act-text" title="${esc(e.text)}">${esc(e.text)}</div>
-      <div class="act-time">${esc(e.type)} · ${timeAgo(e.ts)}</div>
-    </div>
-  </div>`).join(''):`<div class="empty">no activity yet</div>`
+// ── Agents ────────────────────────────────────────────────────────────────────
+
+function renderAgents(agents) {
+  const el = $('agent-list'); if (!el) return
+  const entries = Object.entries(agents)
+  if (!entries.length) { el.innerHTML = '<div class="empty">no agents registered in ~/system/agents.json</div>'; return }
+  el.innerHTML = entries.map(([name,info]) => {
+    const a = info.alive
+    const dc = a===true?'dot-g':a===false?'dot-r':'dot-x'
+    const sc = a===true?'alive':a===false?'dead':'unk'
+    const sl = a===true?'● alive':a===false?'○ unreachable':'– no check'
+    return `<div class="agent-row"><div class="agent-dot ${dc}"></div><div class="agent-name">${esc(name)}</div><div class="${sc}">${sl}</div></div>`
+  }).join('')
+}
+
+// ── Inbox / Alerts ────────────────────────────────────────────────────────────
+
+function renderInbox(inbox) {
+  const el = $('inbox-list'), badge = $('inbox-badge'); if (!el) return
+  if (badge) { badge.textContent = inbox.length||''; badge.style.display = inbox.length?'inline-flex':'none' }
+  el.innerHTML = inbox.length ? inbox.map(n => `
+    <div class="inbox-msg">
+      <div class="inbox-file">${esc(n.file)}</div>
+      <div class="inbox-text" title="${esc(n.text)}">${esc(n.text)}</div>
+    </div>`).join('') : '<div class="empty">inbox empty</div>'
+}
+
+function renderAlerts(alerts) {
+  const el = $('alerts-list'); if (!el) return
+  el.innerHTML = alerts.length ? alerts.map(a =>
+    `<div class="alert-row"><span class="alert-app">${esc(a.app)}</span><span class="alert-line">${esc(a.line)}</span></div>`
+  ).join('') : '<div class="no-alerts">✓ No errors in last 24h</div>'
+}
+
+// ── Apps ──────────────────────────────────────────────────────────────────────
+
+function renderApps(apps) {
+  const SKIP = new Set(['done_today','expected_today','errors_today','healthy','checked','live_processes','alerts','fixes'])
+  const grid = $('apps-grid'), cnt = $('apps-count'); if (!grid) return
+  if (!apps.length) { grid.innerHTML = '<div class="empty">no apps found under ~/apps/ with a state/ directory</div>'; return }
+  if (cnt) cnt.textContent = apps.length + ' app' + (apps.length===1?'':'s') + ' discovered'
+  grid.innerHTML = apps.map(app => {
+    const st = app.status||{}, healthy = st.healthy
+    const hc = healthy===true?'var(--green)':healthy===false?'var(--red)':'var(--tx3)'
+    const hshadow = healthy===true?`box-shadow:0 0 0 3px rgba(0,208,138,.2)`:''
+    const hasP = st.done_today!==undefined && st.expected_today!==undefined
+    const done = st.done_today||0, exp = st.expected_today||1, prog = Math.round(done/exp*100)
+    const errors = st.errors_today||0
+    const kv = Object.entries(st).filter(([k])=>!SKIP.has(k)).slice(0,4)
+      .map(([k,v])=>`<div class="kv-row"><span class="kv-k">${esc(k)}</span><span class="kv-v">${esc(typeof v==='object'?JSON.stringify(v).slice(0,40):String(v).slice(0,50))}</span></div>`).join('')
+    return `<div class="app-card">
+      <div class="app-card-hdr">
+        <div class="app-health" style="background:${hc};${hshadow}"></div>
+        <div class="app-name">${esc(app.name)}</div>
+        ${errors>0?`<span class="badge b-red">${errors}err</span>`:''}
+      </div>
+      <div class="app-body">
+        ${app.views_7d?`<div class="app-views">${fmt(app.views_7d)}</div><div class="app-views-sub">views · last 7 days</div>`:''}
+        ${app.top_video?`<div class="app-top">"${esc(app.top_video)}" · ${fmt(app.top_views||0)} views</div>`:''}
+        ${hasP?`<div class="app-prog"><div class="app-prog-row"><span>Progress</span><span>${done}/${st.expected_today}</span></div><div class="app-prog-bar"><div class="app-prog-fill" style="width:${prog}%;background:${hc}"></div></div></div>`:''}
+        ${kv}
+      </div>
+    </div>`
+  }).join('')
+}
+
+// ── Tasks + Sched ─────────────────────────────────────────────────────────────
+
+function renderTasks(tasks, sched) {
+  const open = tasks.filter(t => t.status === 'open')
+  // badges
+  const sb = $('sb-tasks-badge'), mb = $('mob-badge')
+  if (sb) { sb.textContent = open.length||''; sb.style.display = open.length?'inline-flex':'none' }
+  if (mb) { mb.textContent = open.length||''; mb.style.display = open.length?'inline-flex':'none' }
+  // Live stats
+  const st = $('st-tasks'); if (st) st.textContent = open.length
+  // Task list
+  const el = $('task-list'); if (!el) return
+  el.innerHTML = open.length ? open.map(t => {
+    const pc = {high:'ph',medium:'pm',low:'pl'}[t.priority||'medium']||'pm'
+    return `<div class="task-row">
+      <span class="task-pri ${pc}">${esc(t.priority||'med')}</span>
+      <span class="task-desc" title="${esc(t.desc)}">${esc(t.desc)}</span>
+      <span class="task-id">#${t.id}</span>
+      <button class="task-btn" onclick="markDone(${t.id},this)">done</button>
+    </div>`
+  }).join('') : '<div class="task-empty">✓ All tasks complete</div>'
+  // Sched
+  const sc = $('sched-card'), sl = $('sched-list'), scnt = $('sched-count')
+  if (!sc||!sl) return
+  if (sched.length) {
+    sc.style.display=''; if(scnt) scnt.textContent=sched.length
+    sl.innerHTML = sched.map(j => {
+      const lr = j.last_run?j.last_run.slice(0,10):'never'
+      const le = j.last_exit!==null?(j.last_exit===0?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--red)">✗</span>'):'–'
+      return `<div class="task-row">
+        <span class="task-pri ${j.paused?'pl':'pm'}" style="min-width:80px">${j.paused?'paused':esc(j.schedule_human||j.cron||'?')}</span>
+        <span class="task-desc">${esc(j.name)}</span>
+        <span class="task-id">${lr} ${le}</span>
+        <button class="task-btn" onclick="runJobBtn('${esc(j.name)}',this)">▶</button>
+      </div>`
+    }).join('')
+  } else sc.style.display = 'none'
+}
+
+// ── Budget ────────────────────────────────────────────────────────────────────
+
+function renderBudget(budget) {
+  const total = budget.total||0, bycat = budget.by_category||{}, thresh = budget.thresholds||{}
+  const sum = $('budget-sum'), cats = $('budget-cats'); if (!sum||!cats) return
+  const tt = parseFloat(thresh.total||0), tp = tt?Math.min(100,total/tt*100):0
+  sum.innerHTML = `
+    <div class="b-total">$${total.toFixed(4)}</div>
+    <div class="b-month">${esc(budget.month||'')} spend</div>
+    ${tt?`<div class="b-prog"><div class="b-prog-fill" style="width:${tp.toFixed(1)}%;background:${barColor(tp)}"></div></div><div class="b-limit">of $${tt.toFixed(2)} limit · ${tp.toFixed(0)}%</div>`:'<div class="b-limit">no limit set</div>'}`
+  if (!Object.keys(bycat).length) { cats.innerHTML = '<div class="empty">no spend logged this month</div>'; return }
+  cats.innerHTML = '<div class="form-ttl" style="margin-bottom:14px">By Category</div>' +
+    Object.entries(bycat).map(([cat,val]) => {
+      const ct = parseFloat(thresh[cat]||0), cp = ct?Math.min(100,val/ct*100):0
+      return `<div class="bcat-row">
+        <div class="bcat-name" title="${esc(cat)}">${esc(cat)}</div>
+        <div class="bcat-bar"><div class="bcat-fill" style="width:${Math.max(2,cp).toFixed(1)}%;background:${barColor(cp)}"></div></div>
+        <div class="bcat-val">$${val.toFixed(4)}${ct?' / $'+ct.toFixed(2):''}</div>
+      </div>`
+    }).join('')
+}
+
+// ── Trace ─────────────────────────────────────────────────────────────────────
+
+function renderTrace(trace) {
+  const el = $('trace-list'), cnt = $('trace-count'); if (!el) return
+  const items = [...trace].reverse().slice(0,25)
+  if (cnt) cnt.textContent = items.length + ' entries'
+  el.innerHTML = items.length ? items.map(e => {
+    const ok = e.outcome === 'success'
+    const agent = e.agent || 'agent'
+    const tags = (e.tags||[]).map(t=>`<span class="trace-tag">${esc(t)}</span>`).join('')
+    return `<div class="trace-row">
+      <div class="trace-char" title="${esc(agent)}">${esc(agent)}</div>
+      <div class="trace-icon ${ok?'ti-ok':'ti-fail'}">${ok?'✓':'✗'}</div>
+      <div class="trace-body">
+        <div class="trace-action" title="${esc(e.action)}">${esc(e.action)}</div>
+        ${e.detail?`<div class="trace-detail">${esc(e.detail)}</div>`:''}
+        <div class="trace-foot">${tags}<span class="trace-ts">${timeAgo(e.ts)}</span></div>
+      </div>
+    </div>`
+  }).join('') : '<div class="empty">no outcomes logged yet — use: axis trace log</div>'
 }
 
 // ── Log viewer ────────────────────────────────────────────────────────────────
-let logEs=null, lastLogSources='', activeLogPath=''
+
+let logEs=null, activeLogPath='', miniLogEs=null, miniLogPath='', _logKey=''
 
 function populateLogTabs(sources) {
-  const key=JSON.stringify(sources.map(s=>s.path))
-  if(key===lastLogSources) return
-  lastLogSources=key
-  const tabs=$('log-tabs')
-  if(!sources.length){tabs.innerHTML='<span style="font-size:11px;color:var(--muted);padding:6px 10px">no log files found</span>';return}
-  tabs.innerHTML=sources.map((s,i)=>
-    `<button class="log-tab${i===0?' active':''}" data-path="${esc(s.path)}" data-label="${esc(s.label)}" onclick="switchLog(this)">${esc(s.label)}</button>`
-  ).join('')
-  // Auto-connect to first log on first load
-  if(!activeLogPath && sources.length) {
-    switchLog(tabs.querySelector('.log-tab'))
+  const key = JSON.stringify(sources.map(s=>s.path))
+  if (key === _logKey) return
+  _logKey = key
+  const tabs = $('log-tabs'), miniTabs = $('mini-log-tabs')
+  if (!sources.length) {
+    if (tabs) tabs.innerHTML = '<span style="color:var(--tx3);padding:7px 12px;font-size:11px">no .log files found under ~/apps/ or ~/system/</span>'
+    return
+  }
+  const mkTab = (s,i,mini) => `<button class="log-tab${i===0?' active':''}" data-path="${esc(s.path)}" data-label="${esc(s.label)}" onclick="switchLog(this,${mini})">${esc(s.label)}</button>`
+  if (tabs) tabs.innerHTML = sources.map((s,i)=>mkTab(s,i,false)).join('')
+  if (miniTabs) miniTabs.innerHTML = sources.map((s,i)=>mkTab(s,i,true)).join('')
+  if (!activeLogPath && sources.length) {
+    const b = tabs&&tabs.querySelector('.log-tab'); if (b) switchLog(b,false)
+  }
+  if (!miniLogPath && sources.length) {
+    const b = miniTabs&&miniTabs.querySelector('.log-tab'); if (b) switchLog(b,true)
   }
 }
 
-function switchLog(btn) {
-  if(!btn) return
-  document.querySelectorAll('.log-tab').forEach(b=>b.classList.remove('active'))
+function switchLog(btn, isMini) {
+  if (!btn) return
+  const cont = isMini ? $('mini-log-tabs') : $('log-tabs')
+  const term = isMini ? $('mini-log-term') : $('log-terminal')
+  if (cont) cont.querySelectorAll('.log-tab').forEach(b=>b.classList.remove('active'))
   btn.classList.add('active')
-  const path=btn.dataset.path, label=btn.dataset.label
-  if(!path || path===activeLogPath) return
-  activeLogPath=path
-  $('log-label').textContent=label||''
-  if(logEs){logEs.close();logEs=null}
-  const box=$('log-lines'); box.innerHTML=''
-  logEs=new EventSource('/api/logs/stream?path='+encodeURIComponent(path))
-  logEs.addEventListener('log',e=>{
-    const d=document.createElement('div')
-    d.textContent=e.data
-    box.appendChild(d)
-    while(box.children.length>200) box.removeChild(box.firstChild)
-    box.scrollTop=box.scrollHeight
-  })
-  logEs.addEventListener('error',()=>{/* EventSource reconnects automatically */})
+  const path = btn.dataset.path, label = btn.dataset.label
+  if (isMini) {
+    if (!path || path===miniLogPath) return
+    miniLogPath = path
+    const lbl = $('mini-log-lbl'); if(lbl) lbl.textContent = label||''
+    if (miniLogEs) { miniLogEs.close(); miniLogEs=null }
+    if (term) term.innerHTML = ''
+    miniLogEs = new EventSource('/api/logs/stream?path='+encodeURIComponent(path))
+    miniLogEs.addEventListener('log', e => appendLog(term, e.data, 120))
+  } else {
+    if (!path || path===activeLogPath) return
+    activeLogPath = path
+    const lbl = $('log-lbl'); if(lbl) lbl.textContent = label||''
+    if (logEs) { logEs.close(); logEs=null }
+    if (term) term.innerHTML = ''
+    logEs = new EventSource('/api/logs/stream?path='+encodeURIComponent(path))
+    logEs.addEventListener('log', e => appendLog(term, e.data, 400))
+  }
 }
 
-// ── SSE state stream ──────────────────────────────────────────────────────────
-let stateEs=null
+function appendLog(term, text, maxLines) {
+  if (!term) return
+  const d = document.createElement('div')
+  d.className = 'log-line'
+  d.textContent = text
+  term.appendChild(d)
+  while (term.children.length > maxLines) term.removeChild(term.firstChild)
+  term.scrollTop = term.scrollHeight
+}
+
+// ── Master render ─────────────────────────────────────────────────────────────
+
+function render(s) {
+  window._lastSched = s.sched || []
+  const sys = s.system||{}, env = s.env||{}
+  const pct = sys.used_pct||0, dc = diskColor(pct)
+  // Topbar
+  const tt = $('tb-time'); if(tt) tt.textContent = (s.ts||'').slice(11,16)+' UTC'
+  const td = $('tb-disk')
+  if(td) { td.textContent=(sys.free_gb||'?')+' GB free'; td.style.cssText=`color:${dc};background:${dc}18;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700` }
+  const tm = $('tb-mission'); if(tm && env.mission) tm.textContent = env.mission
+  // Sidebar
+  const sv = $('sb-ver'); if(sv) sv.textContent='v'+(sys.version||'?')
+  const sf = $('sb-disk-fill'), st = $('sb-disk-txt')
+  if(sf) { sf.style.width=pct+'%'; sf.style.background=dc }
+  if(st) st.textContent=(sys.free_gb||'?')+' GB · '+pct+'%'
+  // Live stats
+  const sd = $('st-disk'), sds = $('st-disk-sub')
+  if(sd) { sd.textContent=pct+'%'; sd.style.color=dc }
+  if(sds) sds.textContent=(sys.free_gb||'?')+' GB free'
+  const ag = s.agents||{}, agCount = Object.keys(ag).length, agAlive = Object.values(ag).filter(a=>a.alive===true).length
+  const sa = $('st-agents'); if(sa) { sa.textContent=agCount?`${agAlive}/${agCount}`:'none'; sa.style.color=agCount?'var(--tx)':'var(--tx3)' }
+  const sc2 = $('st-cron'); if(sc2) sc2.textContent=(s.cron||[]).length
+  // Sections
+  updateHero(s.trace||[])
+  renderActivity(s.activity||[])
+  populateLogTabs(s.log_sources||[])
+  renderApps(s.apps||[])
+  renderTasks(s.tasks||[], s.sched||[])
+  renderBudget(s.budget||{})
+  renderTrace(s.trace||[])
+  renderAgents(ag)
+  renderInbox(s.inbox||[])
+  renderAlerts(s.alerts||[])
+}
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
+
+let stateEs = null
 function connectSSE() {
-  if(stateEs) stateEs.close()
-  stateEs=new EventSource('/api/stream')
-  stateEs.addEventListener('state',e=>{
-    try{render(JSON.parse(e.data))}catch(err){console.warn('render error',err)}
-  })
-  stateEs.onerror=()=>{ $('ts').textContent='reconnecting…' }
+  if (stateEs) stateEs.close()
+  stateEs = new EventSource('/api/stream')
+  stateEs.addEventListener('state', e => { try { render(JSON.parse(e.data)) } catch(err) { console.warn(err) } })
+  stateEs.onerror = () => { const t=$('tb-time'); if(t) t.textContent='reconnecting…' }
 }
 connectSSE()
+navTo('live')
 
 // ── Task actions ──────────────────────────────────────────────────────────────
-async function markDone(id,btn){
-  btn.textContent='…';btn.disabled=true
-  try{
-    const r=await fetch('/api/task/done',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})
-    if(r.ok){btn.textContent='✓';btn.style.color='var(--green)'}
-    else{btn.textContent='err';btn.disabled=false}
-  }catch{btn.textContent='err';btn.disabled=false}
+
+async function markDone(id, btn) {
+  btn.textContent='…'; btn.disabled=true
+  const r = await fetch('/api/task/done',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})
+  if (r.ok) { btn.textContent='✓'; btn.style.color='var(--green)' }
+  else { btn.textContent='err'; btn.disabled=false }
 }
 
-async function sendNote(){
-  const inp=$('note-input'),text=inp.value.trim()
-  if(!text) return
-  inp.disabled=true
-  try{
-    await fetch('/api/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})})
-    inp.value=''
-  }finally{inp.disabled=false}
-}
-
-// ── Remote control ─────────────────────────────────────────────────────────────
-let _rcOpen=null
-
-const RC={
-  'add-task':{
-    label:'＋ Task',
-    html:()=>`
-      <input id="rc-desc" placeholder="Task description" maxlength="500" autocomplete="off">
-      <div class="rc-row">
-        <select id="rc-pri"><option value="medium">Medium priority</option><option value="high">High priority</option><option value="low">Low priority</option></select>
-        <button class="rc-submit" onclick="rcPost('task/add',{desc:$('rc-desc').value,priority:$('rc-pri').value})">Add Task</button>
-      </div>`
-  },
-  'log-outcome':{
-    label:'✓ Log',
-    html:()=>`
-      <input id="rc-action" placeholder="What did you do?" maxlength="300" autocomplete="off">
-      <div class="rc-row">
-        <select id="rc-outcome"><option value="success">Success</option><option value="fail">Fail</option></select>
-        <input id="rc-detail" placeholder="Detail (optional)" maxlength="500" style="flex:2">
-        <button class="rc-submit" onclick="rcPost('trace/log',{action:$('rc-action').value,outcome:$('rc-outcome').value,detail:$('rc-detail').value})">Log</button>
-      </div>`
-  },
-  'run-job':{
-    label:'▶ Run Job',
-    html:()=>{
-      const opts=(window._lastSched||[]).map(j=>`<option value="${esc(j.name)}">${esc(j.name)} — ${esc(j.schedule_human||j.cron||'')}</option>`).join('')
-      return opts?`<div class="rc-row"><select id="rc-job">${opts}</select><button class="rc-submit" onclick="rcPost('sched/run',{name:$('rc-job').value})">Run Now</button></div>`
-             :`<div style="color:var(--muted);font-size:13px;padding:4px 0">No scheduled jobs found</div>`
-    }
-  },
-  'note':{
-    label:'✎ Note',
-    html:()=>`
-      <textarea id="rc-note" placeholder="Leave a note for the next agent…" rows="2" maxlength="2000"></textarea>
-      <button class="rc-submit" onclick="rcPost('note',{text:$('rc-note').value})">Send Note</button>`
+async function addTask() {
+  const desc=($('task-desc')||{}).value?.trim(), pri=($('task-pri')||{}).value
+  const fb=$('task-fb')
+  if (!desc) { if(fb) fb.innerHTML='<span style="color:var(--red)">Enter a description</span>'; return }
+  const r = await fetch('/api/task/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({desc,priority:pri})})
+  const res = await r.json()
+  if (res.ok) {
+    $('task-desc').value=''
+    if(fb) fb.innerHTML='<span style="color:var(--green)">✓ Task added</span>'
+    setTimeout(()=>{ if(fb) fb.innerHTML='' },2000)
+  } else {
+    if(fb) fb.innerHTML=`<span style="color:var(--red)">✗ ${esc(res.error||'error')}</span>`
   }
 }
 
-function toggleRC(name) {
-  const drawer=$('rc-drawer')
-  document.querySelectorAll('.rc-btn[id^="rcb-"]').forEach(b=>b.classList.remove('active'))
-  if(_rcOpen===name){
-    _rcOpen=null;drawer.style.display='none';drawer.innerHTML='';return
-  }
-  _rcOpen=name
-  const form=RC[name]
-  if(!form) return
-  drawer.innerHTML=form.html()+'<div id="rc-feedback"></div>'
-  drawer.style.display='block'
-  const btn=document.getElementById('rcb-'+name)
-  if(btn) btn.classList.add('active')
-  const inp=drawer.querySelector('input,textarea,select')
-  if(inp) setTimeout(()=>inp.focus(),50)
+async function runJobBtn(name, btn) {
+  btn.textContent='…'; btn.disabled=true
+  const r = await fetch('/api/sched/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})
+  const res = await r.json()
+  btn.textContent=res.ok?'✓':'✗'; btn.style.color=res.ok?'var(--green)':'var(--red)'
+  setTimeout(()=>{ btn.textContent='▶'; btn.style.color=''; btn.disabled=false },2500)
 }
 
-async function rcPost(endpoint,payload){
-  const fb=$('rc-feedback')
-  if(fb) fb.innerHTML=''
-  try{
-    const r=await fetch('/api/'+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-    const result=await r.json()
-    if(result.ok){
-      if(fb) fb.innerHTML=`<span style="color:var(--green)">✓ Done</span>`
-      setTimeout(()=>{toggleRC(_rcOpen)},1200)
-    } else {
-      if(fb) fb.innerHTML=`<span style="color:var(--red)">✗ ${esc(result.error||'error')}</span>`
-    }
-  }catch(e){
-    if(fb) fb.innerHTML=`<span style="color:var(--red)">✗ network error</span>`
+// ── Action drawer ─────────────────────────────────────────────────────────────
+
+let _drawerOpen = null
+
+function openDrawer(name) {
+  const el = $('drawer')
+  if (_drawerOpen===name) { closeDrawer(); return }
+  _drawerOpen = name
+  document.querySelectorAll('.sb-act-btn').forEach(b=>b.classList.remove('act-open'))
+  const ab = document.querySelector(`[data-act="${name}"]`); if(ab) ab.classList.add('act-open')
+  const forms = {
+    'add-task':`
+      <div class="drawer-ttl">Add Task <button class="drawer-close" onclick="closeDrawer()">×</button></div>
+      <input class="finput" id="d-desc" placeholder="Task description" maxlength="500" autocomplete="off">
+      <div class="frow">
+        <select class="fselect" id="d-pri"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
+        <button class="fbtn" onclick="dPost('task/add',{desc:($('d-desc')||{}).value?.trim(),priority:($('d-pri')||{}).value})">Add</button>
+      </div><div class="ffb" id="d-fb"></div>`,
+    'log':`
+      <div class="drawer-ttl">Log Outcome <button class="drawer-close" onclick="closeDrawer()">×</button></div>
+      <input class="finput" id="d-act" placeholder="What did the agent do?" maxlength="300" autocomplete="off">
+      <div class="frow">
+        <select class="fselect" id="d-out"><option value="success">Success</option><option value="fail">Fail</option></select>
+        <input class="finput" id="d-det" placeholder="Detail (optional)" maxlength="500" style="flex:2;margin:0">
+        <button class="fbtn g" onclick="dPost('trace/log',{action:($('d-act')||{}).value?.trim(),outcome:($('d-out')||{}).value,detail:($('d-det')||{}).value?.trim()})">Log</button>
+      </div><div class="ffb" id="d-fb"></div>`,
+    'run':`
+      <div class="drawer-ttl">Run Job <button class="drawer-close" onclick="closeDrawer()">×</button></div>
+      <div class="frow">
+        <select class="fselect" id="d-job">${(window._lastSched||[]).map(j=>`<option value="${esc(j.name)}">${esc(j.name)} — ${esc(j.schedule_human||j.cron||'')}</option>`).join('')||'<option>no jobs found</option>'}</select>
+        <button class="fbtn" onclick="dPost('sched/run',{name:($('d-job')||{}).value})">▶ Run</button>
+      </div><div class="ffb" id="d-fb"></div>`,
+    'note':`
+      <div class="drawer-ttl">Send Note <button class="drawer-close" onclick="closeDrawer()">×</button></div>
+      <textarea class="finput" id="d-note" placeholder="Message for the next agent…" rows="2" maxlength="2000" style="resize:none"></textarea>
+      <button class="fbtn" onclick="dPost('note',{text:($('d-note')||{}).value?.trim()})">Send Note</button>
+      <div class="ffb" id="d-fb"></div>`,
   }
+  el.innerHTML = forms[name] || ''
+  el.classList.add('open')
+  setTimeout(()=>{ const inp=el.querySelector('input,textarea'); if(inp) inp.focus() },80)
 }
 
-async function clearAlerts(){
-  const btn=$('rcb-alerts')
-  if(btn){btn.textContent='…';btn.disabled=true}
-  try{
-    const r=await fetch('/api/alert/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-    const result=await r.json()
-    if(btn){btn.textContent=result.ok?'✓ Cleared':'✗ Error';btn.style.color=result.ok?'var(--green)':'var(--red)';btn.disabled=false}
-    setTimeout(()=>{if(btn){btn.textContent='✗ Clear Alerts';btn.style.color=''}},2000)
-  }catch{if(btn){btn.textContent='✗ Error';btn.disabled=false}}
+function closeDrawer() {
+  _drawerOpen = null
+  const el = $('drawer'); if(el) el.classList.remove('open')
+  document.querySelectorAll('.sb-act-btn').forEach(b=>b.classList.remove('act-open'))
+}
+
+async function dPost(endpoint, payload) {
+  const fb = $('d-fb')
+  if (payload.desc === '' || payload.action === '') {
+    if(fb) fb.innerHTML='<span style="color:var(--red)">Required field is empty</span>'; return
+  }
+  try {
+    const r = await fetch('/api/'+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    const res = await r.json()
+    if (res.ok) { if(fb) fb.innerHTML='<span style="color:var(--green)">✓ Done</span>'; setTimeout(closeDrawer,1200) }
+    else { if(fb) fb.innerHTML=`<span style="color:var(--red)">✗ ${esc(res.error||'error')}</span>` }
+  } catch { if(fb) fb.innerHTML='<span style="color:var(--red)">✗ network error</span>' }
+}
+
+async function clearAlerts() {
+  await fetch('/api/alert/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
 }
 </script>
 </body>
@@ -971,8 +1212,9 @@ class DashHandler(BaseHTTPRequestHandler):
                 payload = json.dumps(build_state(), default=str)
                 self.wfile.write(f"event: state\ndata: {payload}\n\n".encode())
                 self.wfile.flush()
-                for _ in range(6):
-                    time.sleep(0.5)
+                # Check every 0.25s for trace changes; push immediately on change
+                for _ in range(4):
+                    time.sleep(0.25)
                     try:
                         sz = TRACE.stat().st_size
                         if sz != last_sz: last_sz = sz; break
@@ -982,7 +1224,6 @@ class DashHandler(BaseHTTPRequestHandler):
     def _serve_sse_logs(self, query_string):
         params = parse_qs(query_string)
         raw = unquote(params.get("path",[""])[0])
-        # Validate: must be within HOME and end in .log
         try: abs_path = str(Path(raw).resolve())
         except: abs_path = ""
         home_str = str(HOME)
@@ -990,23 +1231,20 @@ class DashHandler(BaseHTTPRequestHandler):
             self._sse_headers()
             self.wfile.write(b"event: error\ndata: forbidden\n\n")
             self.wfile.flush(); return
-        # Must be in discovered log list
         allowed = {d["path"] for d in discover_logs()}
         if abs_path not in allowed:
             self._sse_headers()
             self.wfile.write(b"event: error\ndata: forbidden\n\n")
             self.wfile.flush(); return
         self._sse_headers()
-        # Send last 30 lines as preamble
         try:
-            result = subprocess.run(["tail","-n","30",abs_path], capture_output=True, text=True, timeout=5)
+            result = subprocess.run(["tail","-n","40",abs_path], capture_output=True, text=True, timeout=5)
             for line in result.stdout.splitlines():
                 clean = line.rstrip()
                 if clean:
                     self.wfile.write(f"event: log\ndata: {clean}\n\n".encode())
             self.wfile.flush()
         except (OSError, subprocess.TimeoutExpired): pass
-        # Follow with tail -f
         proc = subprocess.Popen(["tail","-f","-n","0",abs_path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
             while True:
